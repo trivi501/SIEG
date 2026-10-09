@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SIEG es el sistema de **egresos** del Ayuntamiento de Guadalupe, Zacatecas: presupuesto de egresos, requisiciones, Recursos Materiales (cotización y suficiencia presupuestal), órdenes de compra con factura XML y modificaciones presupuestales. Es un monolito **Laravel 13 + Inertia.js + React 19 (TypeScript)**.
 
-Se separó de **SIEMG** (`C:\laragon\www\siemg`, sistema de ingresos: predial, cajas, cobro) el 2026-10-08: es una copia de ese proyecto a la que se le quitaron los módulos de ingresos. Usa su propia base de datos **`sieg`** (copia de las tablas de egresos, usuarios, roles, permisos, secretarías y catálogos requeridos). Las convenciones de código son las mismas que en SIEMG. La documentación funcional está en `docs/`.
+Se separó de **SIEMG** (`C:\laragon\www\siemg`, sistema de ingresos: predial, cajas, cobro) el 2026-10-08: es una copia de ese proyecto a la que se le quitaron los módulos de ingresos. Usa su propia base de datos **`sieg`** (copia de las tablas de egresos, usuarios, roles, permisos, secretarías y catálogos requeridos). Las convenciones de código son las mismas que en SIEMG. La documentación funcional está en `docs/` (`arquitectura.md`, `modulos.md`, `permisos.md`, `base-de-datos.md`, `instalacion.md`, `operacion-y-despliegue.md`); conviene leer el documento del módulo antes de cambiar reglas de negocio.
 
 ## Comandos
 
@@ -18,9 +18,14 @@ npm run format             # prettier --write resources/
 npm run types:check        # tsc --noEmit
 composer lint              # pint (fix)
 php artisan test           # PHPUnit (SQLite en memoria)
+php artisan test --filter=DashboardTest   # una sola prueba / clase
+composer test              # config:clear + pint --test + php artisan test
+composer ci:check          # eslint, prettier y pint en modo check, tsc y pruebas
 php artisan permissions:sync
 php artisan wayfinder:generate
 ```
+
+Los scripts `lint:check` / `format:check` (npm) y `lint:check` (composer) validan sin modificar archivos. En servidores, los permisos se sincronizan con `scripts/sync-permissions.sh` (además limpia caché de config, rutas y vistas).
 
 SIEG usa los puertos 8001/5174 para correr junto a SIEMG (8000/5173). En el mismo navegador hay que abrirlos con hosts distintos (`localhost` vs `127.0.0.1`) o la cookie `XSRF-TOKEN` de uno pisa la del otro (errores 419).
 
