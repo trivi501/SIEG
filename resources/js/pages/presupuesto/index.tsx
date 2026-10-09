@@ -126,7 +126,7 @@ export default function Presupuesto({ presupuestos, filters }: { presupuestos: P
                     </div>
                 )}
                 <div className="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-                    <h2 className="mb-4 text-xl font-semibold">Importar Presupuesto de Egresos 2024</h2>
+                    <h2 className="mb-4 text-xl font-semibold">Importar Presupuesto de Egresos {new Date().getFullYear()}</h2>
                     <Form action={importMethod()} className="flex items-end gap-4" encType="multipart/form-data">
                         {({ processing, errors }) => (
                             <>
