@@ -96,10 +96,15 @@
     <p><span class="label">Observaciones:</span> {{ $orden->observaciones }}</p>
     @endif
 
+    @php
+        $unidadId = $req?->id_cat_egreso_unidad_administrativa;
+        $elabora = \App\Models\Firmante::vigente('orden_compra', 'elabora', $unidadId, $orden->fecha);
+        $autoriza = \App\Models\Firmante::vigente('orden_compra', 'autoriza', $unidadId, $orden->fecha);
+    @endphp
     <table class="firmas">
         <tr>
-            <td><div class="firma-linea">Elaboró<br>Recursos Materiales</div></td>
-            <td><div class="firma-linea">Autorizó</div></td>
+            <td><div class="firma-linea">Elaboró<br>{{ $elabora?->nombre ?? 'Recursos Materiales' }}@if($elabora)<br>{{ $elabora->cargo }}@endif</div></td>
+            <td><div class="firma-linea">Autorizó@if($autoriza)<br>{{ $autoriza->nombre }}<br>{{ $autoriza->cargo }}@endif</div></td>
             <td><div class="firma-linea">Proveedor<br>{{ $orden->proveedor->nombre }}</div></td>
         </tr>
     </table>

@@ -82,10 +82,14 @@
                 </div>
             </td>
             <td>
+                @php
+                    $autoriza = \App\Models\Firmante::vigente('requisicion', 'autoriza', $requisicion->id_cat_egreso_unidad_administrativa,
+                        $requisicion->registro ? \Carbon\Carbon::parse($requisicion->registro) : null);
+                @endphp
                 <div class="firma-linea">
-                    <strong>___________________________</strong><br>
+                    <strong>{{ $autoriza?->nombre ?? '___________________________' }}</strong><br>
                     Autorizó
-                    <br><small>&nbsp;</small>
+                    <br><small>{{ $autoriza?->cargo ?? "\u{00A0}" }}</small>
                 </div>
             </td>
         </tr>

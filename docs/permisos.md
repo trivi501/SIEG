@@ -23,13 +23,17 @@ Crea los permisos que falten y asigna **todos** a **Super Admin** y **Admin**. L
 
 Para agregar un permiso: protege la ruta (`->middleware('permission:modulo-accion')`), agrega el nombre al arreglo del comando, corre `permissions:sync` en cada entorno y usa el mismo nombre en el menú o en `userPermissions.includes(...)`.
 
+Los permisos de los **catálogos** no se escriben a mano: el comando los toma del registro `app/Catalogos/Catalogos.php` (cinco por catálogo) y les pone nombre legible y la categoría *Catálogos* para la pantalla de Roles. Sus rutas son compartidas (`/catalogos/{catalogo}`) y las protege el middleware `catalogo:<acción>`, que exige `{prefijo}-<acción>` del catálogo de la URL.
+
 ## Catálogo de permisos
 
 | Módulo | Permisos |
 |---|---|
 | Presupuesto | `presupuesto-index`, `-edit`, `-import`, `-delete` |
 | Requisiciones | `requisiciones-index`, `-create`, `-edit`, `-delete`, `requisiciones-suficiencia` |
-| Órdenes de compra y proveedores | `ordenes-compra-create`, `proveedores-index`, `-create`, `-edit`, `-delete` |
+| Órdenes de compra y proveedores | `ordenes-compra-create`, `proveedores-index`, `-create`, `-edit`, `-delete`, `-import` |
+| Catálogos | `catalogos-{slug}-index`, `-create`, `-edit`, `-delete` (dar de baja / reactivar), `-import`; p. ej. `catalogos-vehiculos-edit`. Slugs en [Módulos](modulos.md#catálogos-generales) |
+| Bitácora de auditoría | `auditoria-index` |
 | Modificaciones presupuestales | `modificaciones-index`, `modificaciones-create`, `modificaciones-autorizar` |
 | Secretarías | `secretarias-index`, `-create`, `-edit`, `-delete` |
 | Tickets de soporte | `tickets-index`, `tickets-create`, `tickets-update` |
@@ -45,6 +49,8 @@ Crear estos roles en **Administración → Roles**:
 | Área solicitante | `requisiciones-index`, `requisiciones-create`, `requisiciones-edit`, `modificaciones-index`, `modificaciones-create` |
 | Recursos Materiales | `requisiciones-index`, `requisiciones-edit`, `requisiciones-suficiencia`, `ordenes-compra-create`, `proveedores-*` |
 | Jefe de Control Presupuestal | `modificaciones-index`, `modificaciones-autorizar` |
+| Control Vehicular | `catalogos-vehiculos-*` |
+| Consulta de catálogos | `catalogos-*-index` de los catálogos que deba ver |
 
 La validación de requisiciones en revisión (botones *Válida / No válida*) solo se muestra a Admin y Super Admin; la ruta exige `requisiciones-edit`, así que la restricción por rol es solo en pantalla.
 

@@ -40,6 +40,10 @@ routes/web.php           Todas las rutas, con su permiso
 
 **Permisos en la ruta.** Cada ruta de `routes/web.php` lleva `->middleware('permission:…')`. No usar `$this->middleware()` en constructores (el `Controller` base de Laravel 13 no lo tiene). Todo permiso nuevo se agrega también a `SyncPermissions` (ver [Permisos](permisos.md)).
 
+**Catálogos genéricos.** `app/Catalogos/` declara cada catálogo (`Catalogos.php`) con sus campos (`Campo`: texto, entero, fecha, booleano, selección, relación, calculado). De esa definición salen la pantalla `pages/catalogos/Catalogo.tsx`, la validación, la plantilla e importación (`Importador`), el historial y los permisos; `CatalogoController` atiende todos. Para un catálogo nuevo basta el modelo (con el trait `Auditable`), su migración y la entrada en `Catalogos.php`. Las tablas del sistema anterior no tienen AUTO_INCREMENT: el modelo lleva `$incrementing = false` y `Catalogo::crear()` calcula el siguiente id; las columnas obligatorias que no se capturan van en `valoresFijos`.
+
+**Auditoría.** El trait `App\Models\Concerns\Auditable` escribe en `auditoria` cada alta, modificación, baja/reactivación (cambio de `activo`) y eliminación, con los valores anterior y nuevo. `Auditoria::enLote()` agrupa los cambios de una importación. Los `update()` masivos (`whereIn(...)->update()`) no generan eventos y no quedan auditados.
+
 **Transacciones.** Requisición con sus conceptos, validación de suficiencia, orden de compra y autorización de modificaciones van dentro de `DB::transaction()`; la suficiencia y los folios usan `lockForUpdate()` para que dos usuarios no comprometan el mismo saldo ni repitan folio.
 
 **Tablas legadas con llaves obligatorias.** `tb_egreso_requisicion` y su detalle exigen llaves a catálogos del sistema anterior (`tb_egreso_presupuesto`, `cat_area_x_nombre_y_puesto`, `tb_usuarios`, `cat_egreso_producto`…). El controlador llena esas columnas con el id `1` de cada catálogo; ese registro debe existir.

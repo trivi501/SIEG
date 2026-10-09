@@ -87,7 +87,7 @@ export default function Index({ requisiciones, estados, filters }: { requisicion
                     </p>
                     </div>
                     <Button variant="outline" asChild>
-                        <Link href="/proveedores">Proveedores</Link>
+                        <Link href="/catalogos/proveedores">Proveedores</Link>
                     </Button>
                 </div>
 

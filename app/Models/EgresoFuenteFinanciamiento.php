@@ -2,13 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class EgresoFuenteFinanciamiento extends Model
 {
+    use Auditable;
+
     protected $table = 'cat_egreso_fuente_financiamiento';
 
     protected $primaryKey = 'id_cat_egreso_fuente_financiamiento';
+
+    public $incrementing = false;
 
     public $timestamps = false;
 
@@ -18,6 +23,11 @@ class EgresoFuenteFinanciamiento extends Model
         'nombre',
         'activo'
     ];
+
+    protected function casts(): array
+    {
+        return ['activo' => 'boolean'];
+    }
 
     public function tbEgresoPresupuestos()
     {

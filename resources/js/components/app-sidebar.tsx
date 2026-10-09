@@ -1,6 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { Building2, LayoutGrid, Wallet, ClipboardCheck } from 'lucide-react';
+import { BookOpen, Building2, LayoutGrid, Wallet, ClipboardCheck } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavAdmin } from '@/components/nav-admin';
 import { NavMain } from '@/components/nav-main';
@@ -18,9 +18,14 @@ import {
 import { dashboard, presupuesto } from '@/routes';
 import type { NavItem } from '@/types';
 
+/** `catalogos-*` = cualquier permiso que empiece con "catalogos-". */
 function hasPermission(permission?: string): boolean {
     if (!permission) return true;
     const perms = (usePage().props.userPermissions as string[]) ?? [];
+    if (permission.endsWith('*')) {
+        const prefijo = permission.slice(0, -1);
+        return perms.some((p) => p.startsWith(prefijo));
+    }
     return perms.includes(permission);
 }
 
@@ -29,8 +34,8 @@ function getCurrentPath(): string {
 }
 
 function findActiveSection(path: string): SectionKey | null {
-    if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/proveedores') || path.startsWith('/modificaciones-presupuestales')) return 'Requisiciones';
-    if (path.startsWith('/settings/users') || path.startsWith('/settings/roles') || path.startsWith('/settings/permissions')) return 'Administración';
+    if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/catalogos/proveedores') || path.startsWith('/modificaciones-presupuestales')) return 'Requisiciones';
+    if (path.startsWith('/settings/users') || path.startsWith('/settings/roles') || path.startsWith('/settings/permissions') || path.startsWith('/auditoria')) return 'Administración';
     if (path.startsWith('/settings/profile') || path.startsWith('/settings/security') || path.startsWith('/settings/appearance')) return 'Ajustes';
     return null;
 }
@@ -67,7 +72,7 @@ const mainNavItems: NavItem[] = [
             { title: 'Listado', href: '/requisiciones', permission: 'requisiciones-index' },
             { title: 'Nueva', href: '/requisiciones/crear', permission: 'requisiciones-create' },
             { title: 'Recursos Materiales', href: '/recursos-materiales', permission: 'requisiciones-index' },
-            { title: 'Proveedores', href: '/proveedores', permission: 'proveedores-index' },
+            { title: 'Proveedores', href: '/catalogos/proveedores', permission: 'proveedores-index' },
             { title: 'Cómo va el gasto', href: '/requisiciones/gasto', permission: 'requisiciones-index' },
             { title: 'Modificaciones Presupuestales', href: '/modificaciones-presupuestales', permission: 'modificaciones-index' },
         ],
@@ -75,6 +80,12 @@ const mainNavItems: NavItem[] = [
 ];
 
 const moduleNavItems: NavItem[] = [
+    {
+        title: 'Catálogos',
+        href: '/catalogos',
+        icon: BookOpen,
+        permission: 'catalogos-*',
+    },
     {
         title: 'Secretarías',
         href: '/secretarias',

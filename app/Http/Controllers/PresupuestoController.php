@@ -2,8 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\EgresoFuenteFinanciamiento;
+use App\Models\EgresoObjetoGasto;
+use App\Models\EgresoProyecto;
 use App\Models\PresupuestoEgreso;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
@@ -183,6 +187,7 @@ class PresupuestoController extends Controller
 
         $numericFields = ['IMPORTE_TOTAL', 'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEP', 'OCTUBRE', 'NOV', 'DIC'];
         $imported = 0;
+        $claves = ['CLAVE3' => [], 'CLAVE6' => [], 'PARTIDA' => []];
 
         foreach ($rows as $row) {
             $data = [];
@@ -214,8 +219,48 @@ class PresupuestoController extends Controller
             $data['IMPORTE_TOTAL'] = $total;
             PresupuestoEgreso::create($data);
             $imported++;
+
+            foreach (array_keys($claves) as $col) {
+                if (isset($data[$col]) && trim((string) $data[$col]) !== '') {
+                    $claves[$col][trim((string) $data[$col])] = true;
+                }
+            }
         }
 
-        return back()->with('success', "Se importaron $imported registros correctamente.");
+        $mensaje = "Se importaron $imported registros correctamente.";
+        $faltantes = $this->clavesSinCatalogo($claves);
+
+        if ($faltantes !== []) {
+            $mensaje .= ' Aviso: hay claves que no están en los catálogos — '.implode('; ', $faltantes)
+                .'. Agrégalas en Catálogos o corre php artisan catalogos:inicializar.';
+        }
+
+        return back()->with('success', $mensaje);
+    }
+
+    /** Fuentes, proyectos y partidas del archivo importado que no existen en su catálogo. */
+    private function clavesSinCatalogo(array $claves): array
+    {
+        $catalogos = [
+            'CLAVE3' => [EgresoFuenteFinanciamiento::class, 'fuentes'],
+            'CLAVE6' => [EgresoProyecto::class, 'proyectos'],
+            'PARTIDA' => [EgresoObjetoGasto::class, 'partidas'],
+        ];
+        $avisos = [];
+
+        foreach ($catalogos as $col => [$modelo, $etiqueta]) {
+            if ($claves[$col] === [] || ! Schema::hasTable((new $modelo)->getTable())) {
+                continue;
+            }
+
+            $existentes = $modelo::whereIn('clave', array_keys($claves[$col]))->pluck('clave')->map(fn ($c) => (string) $c)->all();
+            $faltan = array_values(array_diff(array_map('strval', array_keys($claves[$col])), $existentes));
+
+            if ($faltan !== []) {
+                $avisos[] = "{$etiqueta}: ".implode(', ', array_slice($faltan, 0, 5)).(count($faltan) > 5 ? ' y '.(count($faltan) - 5).' más' : '');
+            }
+        }
+
+        return $avisos;
     }
 }

@@ -1,6 +1,6 @@
 # Módulos
 
-Menú lateral: **Panel**, **Presupuesto**, **Requisiciones** (listado, nueva, Recursos Materiales, proveedores, cómo va el gasto, modificaciones presupuestales), **Secretarías** y **Administración**. Cada entrada aparece solo con su permiso (ver [Permisos](permisos.md)).
+Menú lateral: **Panel**, **Presupuesto**, **Requisiciones** (listado, nueva, Recursos Materiales, proveedores, cómo va el gasto, modificaciones presupuestales), **Catálogos**, **Secretarías** y **Administración**. Cada entrada aparece solo con su permiso (ver [Permisos](permisos.md)).
 
 ## Panel
 
@@ -66,7 +66,7 @@ flowchart TD
 
 ## Órdenes de compra y facturas
 
-- Se elige el **proveedor** (`/proveedores`, catálogo con RFC), la fecha y observaciones. Folio `OC-AÑO-0001`; el importe es el total de la requisición. PDF imprimible.
+- Se elige el **proveedor** (`/catalogos/proveedores`, catálogo con RFC), la fecha y observaciones. Folio `OC-AÑO-0001`; el importe es el total de la requisición. PDF imprimible.
 - **Cargar factura (XML CFDI 3.3/4.0)**: se rechaza si
   - el total del CFDI no coincide con lo cotizado (tolerancia de 1 centavo),
   - el RFC del emisor no es el del proveedor de la orden,
@@ -92,9 +92,40 @@ Las áreas solo ven y usan líneas de sus unidades; quien autoriza ve todas.
 
 ---
 
+## Catálogos generales
+
+`/catalogos` — Portada con los catálogos que el usuario puede ver, por grupo. Cada catálogo (`/catalogos/{slug}`) tiene la misma pantalla:
+
+- **Altas y modificaciones** en un diálogo; la validación (obligatorios, únicos, formatos) es la misma al capturar y al importar.
+- **Bajas lógicas**: *Dar de baja* deja el registro inactivo y se puede *Reactivar*. Nada se borra, porque hay documentos que los referencian.
+- **Historial** de cada registro: quién, cuándo y qué cambió (valor anterior → nuevo).
+- **Importación masiva** desde Excel o CSV: se descarga la plantilla (con una hoja de instrucciones), se sube y se ve una **vista previa** con altas, modificaciones, sin cambios y errores por renglón. No se guarda nada hasta confirmar, y no se puede confirmar si algún renglón tiene errores. Si el registro ya existe (por su llave, p. ej. la clave o el número económico) se actualiza, y las celdas vacías no borran el valor actual.
+
+| Grupo | Catálogo (`slug`) | Notas |
+|---|---|---|
+| Estructura orgánica | Secretarías (`/secretarias`, pantalla propia) | Dependencias, prefijo de folios y direcciones asignadas |
+| | Direcciones (`unidades-administrativas`) | Centros gestores = `cat_egreso_unidad_administrativa`; responsable y cargo. Llave: clave + año |
+| | Departamentos (`departamentos`) | Dentro de cada dirección |
+| | Responsables y firmantes (`firmantes`) | Por tipo de documento y rol (elabora, revisa, autoriza, visto bueno), con vigencia. Uno con dirección tiene prioridad sobre el general |
+| Clasificación presupuestal | Objeto del Gasto (`objeto-gasto`) | Partida específica; capítulo, concepto y genérica se derivan de la clave (CONAC). Tipo de gasto |
+| | Fuentes de financiamiento, Programas, Proyectos | Claves de `CLAVE3` y `CLAVE6` del presupuesto |
+| Ejercicios y documentos | Ejercicios fiscales (`ejercicios`) | Abierto / cerrado: un ejercicio **cerrado** bloquea requisiciones nuevas de ese año |
+| | Tipos de documento (`tipos-documento`) | `requisicion`, `orden_compra` y `modificacion_presupuestal` los usan los PDF para buscar firmantes |
+| Proveedores y bancos | Proveedores (`proveedores`) | RFC validado; permisos `proveedores-*` |
+| | Cuentas bancarias (`cuentas-bancarias`) | CLABE con dígito verificador; el banco se toma de sus 3 primeros dígitos; una sola cuenta principal por proveedor |
+| | Bancos (`bancos`) | `cat_banco` con clave de 3 dígitos |
+| Padrón vehicular | Vehículos (`vehiculos`) | Número económico, placas, serie, secretaría asignada, resguardante. Los cambios de resguardante quedan en el historial |
+
+**Firmantes en los PDF.** La requisición (*Autorizó*), la orden de compra (*Elaboró*, *Autorizó*) y la modificación presupuestal (*Procede / No procede*) imprimen nombre y cargo del firmante vigente en la fecha del documento; sin firmante configurado conservan el texto anterior.
+
+**Carga inicial.** `php artisan catalogos:inicializar` agrega a fuentes, proyectos y partidas las claves que ya usa el presupuesto importado, la lista de bancos y el ejercicio fiscal actual. Solo agrega lo que falta (`--pretend` muestra cuántos). Al importar el presupuesto, el mensaje avisa qué claves no están en los catálogos.
+
+---
+
 ## Administración
 
 - `/secretarias` — Secretarías: nombre, **prefijo de folios** de requisiciones y **unidades administrativas** asignadas (define qué requisiciones y presupuesto ve cada área).
+- `/auditoria` — **Bitácora de auditoría**: todas las altas, modificaciones, bajas y reactivaciones de los catálogos y secretarías, con usuario, IP, fecha y valores anterior/nuevo. Filtros por catálogo, usuario, acción y fechas; un clic en *Registro #* muestra todo lo de ese registro y uno en la descripción del lote muestra toda una importación.
 - `/settings/users` — Usuarios: rol y secretaría.
 - `/settings/roles`, `/settings/permissions` — Roles y permisos (ver [Permisos](permisos.md)).
 - `/support-tickets` — Tickets de soporte con comentarios y notificaciones.

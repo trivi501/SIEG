@@ -918,7 +918,7 @@ export default function Show({
                                 <p className="text-xs text-muted-foreground">
                                     No hay proveedores activos.{' '}
                                     <Link
-                                        href="/proveedores"
+                                        href="/catalogos/proveedores"
                                         className="text-primary hover:underline"
                                     >
                                         Dar de alta proveedores

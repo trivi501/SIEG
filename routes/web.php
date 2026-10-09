@@ -1,15 +1,19 @@
 <?php
 
+use App\Catalogos\Catalogos;
+use App\Http\Controllers\AuditoriaController;
+use App\Http\Controllers\CatalogoController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EgresoRequisicionController;
 use App\Http\Controllers\ModificacionPresupuestalController;
 use App\Http\Controllers\OrdenCompraController;
 use App\Http\Controllers\PresupuestoController;
-use App\Http\Controllers\ProveedorController;
 use App\Http\Controllers\SecretariaController;
 use App\Http\Controllers\SupportTicketController;
 use Illuminate\Support\Facades\Route;
 use Rap2hpoutre\LaravelLogViewer\LogViewerController;
+
+Route::bind('catalogo', fn (string $slug) => Catalogos::buscar($slug) ?? abort(404));
 
 Route::inertia('/', 'welcome')->name('home');
 
@@ -70,11 +74,23 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'cargarXml'])->name('ordenes-compra.xml')->middleware('permission:ordenes-compra-create');
     Route::get('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'descargarXml'])->name('ordenes-compra.xml.descargar')->middleware('permission:requisiciones-index');
 
-    // Proveedores
-    Route::get('proveedores', [ProveedorController::class, 'index'])->name('proveedores.index')->middleware('permission:proveedores-index');
-    Route::post('proveedores', [ProveedorController::class, 'store'])->name('proveedores.store')->middleware('permission:proveedores-create');
-    Route::put('proveedores/{proveedor}', [ProveedorController::class, 'update'])->name('proveedores.update')->middleware('permission:proveedores-edit');
-    Route::delete('proveedores/{proveedor}', [ProveedorController::class, 'destroy'])->name('proveedores.destroy')->middleware('permission:proveedores-delete');
+    // Proveedores: ahora es un catálogo más (/catalogos/proveedores)
+    Route::redirect('proveedores', '/catalogos/proveedores');
+
+    // Catálogos generales (definidos en App\Catalogos\Catalogos). El permiso depende del catálogo:
+    // el middleware catalogo:<accion> exige "{prefijo}-<accion>" (p. ej. catalogos-vehiculos-edit).
+    Route::get('catalogos', [CatalogoController::class, 'inicio'])->name('catalogos.inicio');
+    Route::get('catalogos/{catalogo}', [CatalogoController::class, 'index'])->name('catalogos.index')->middleware('catalogo:index');
+    Route::post('catalogos/{catalogo}', [CatalogoController::class, 'store'])->name('catalogos.store')->middleware('catalogo:create');
+    Route::get('catalogos/{catalogo}/plantilla', [CatalogoController::class, 'plantilla'])->name('catalogos.plantilla')->middleware('catalogo:import');
+    Route::post('catalogos/{catalogo}/importar/previa', [CatalogoController::class, 'previa'])->name('catalogos.previa')->middleware('catalogo:import');
+    Route::post('catalogos/{catalogo}/importar', [CatalogoController::class, 'importar'])->name('catalogos.importar')->middleware('catalogo:import');
+    Route::put('catalogos/{catalogo}/{registro}', [CatalogoController::class, 'update'])->name('catalogos.update')->middleware('catalogo:edit');
+    Route::post('catalogos/{catalogo}/{registro}/estado', [CatalogoController::class, 'estado'])->name('catalogos.estado')->middleware('catalogo:delete');
+    Route::get('catalogos/{catalogo}/{registro}/historial', [CatalogoController::class, 'historial'])->name('catalogos.historial')->middleware('catalogo:index');
+
+    // Bitácora de auditoría
+    Route::get('auditoria', [AuditoriaController::class, 'index'])->name('auditoria.index')->middleware('permission:auditoria-index');
 
     // Modificaciones presupuestales
     Route::get('modificaciones-presupuestales', [ModificacionPresupuestalController::class, 'index'])->name('modificaciones-presupuestales.index')->middleware('permission:modificaciones-index');

@@ -98,10 +98,13 @@
     </div>
     @endif
 
+    @php
+        $autoriza = \App\Models\Firmante::vigente('modificacion_presupuestal', 'autoriza', null, $modificacion->created_at);
+    @endphp
     <table class="firmas">
         <tr>
             <td><div class="firma-linea">Solicita<br>{{ $modificacion->solicitante?->name }}</div></td>
-            <td><div class="firma-linea">Procede / No procede<br>Jefe de Control Presupuestal</div></td>
+            <td><div class="firma-linea">Procede / No procede<br>@if($autoriza){{ $autoriza->nombre }}<br>{{ $autoriza->cargo }}@else Jefe de Control Presupuestal @endif</div></td>
         </tr>
     </table>
 

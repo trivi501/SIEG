@@ -22,6 +22,7 @@ php artisan test --filter=DashboardTest   # una sola prueba / clase
 composer test              # config:clear + pint --test + php artisan test
 composer ci:check          # eslint, prettier y pint en modo check, tsc y pruebas
 php artisan permissions:sync
+php artisan catalogos:inicializar --pretend   # sin --pretend agrega fuentes/proyectos/partidas del presupuesto, bancos y ejercicio
 php artisan wayfinder:generate
 ```
 
@@ -29,7 +30,7 @@ Los scripts `lint:check` / `format:check` (npm) y `lint:check` (composer) valida
 
 SIEG usa los puertos 8001/5174 para correr junto a SIEMG (8000/5173). En el mismo navegador hay que abrirlos con hosts distintos (`localhost` vs `127.0.0.1`) o la cookie `XSRF-TOKEN` de uno pisa la del otro (errores 419).
 
-**Permisos** — la fuente de verdad es el arreglo de `app/Console/Commands/SyncPermissions.php`. `permissions:sync` crea los que falten y asigna todos a **Super Admin** y **Admin**; los demás roles (Área, Recursos Materiales, Jefe de Control Presupuestal…) se administran desde la pantalla de Roles. Todo permiso nuevo en una ruta debe agregarse al comando y sincronizarse.
+**Permisos** — la fuente de verdad es el arreglo de `app/Console/Commands/SyncPermissions.php`. `permissions:sync` crea los que falten y asigna todos a **Super Admin** y **Admin**; los demás roles (Área, Recursos Materiales, Jefe de Control Presupuestal…) se administran desde la pantalla de Roles. Todo permiso nuevo en una ruta debe agregarse al comando y sincronizarse. Excepción: los permisos de catálogos (`{prefijo}-index|create|edit|delete|import`) los genera el comando desde `app/Catalogos/Catalogos.php`.
 
 **Wayfinder** — `resources/js/routes/` y `resources/js/actions/` son generados (en `.gitignore`); con `npm run dev` se regeneran solos.
 
@@ -38,7 +39,10 @@ SIEG usa los puertos 8001/5174 para correr junto a SIEMG (8000/5173). En el mism
 ### Backend
 
 - Controladores en `app/Http/Controllers` concentran validación, reglas y escritura. Los saldos del presupuesto (asignado, modificado, vigente, comprometido, en trámite, disponible), la validación de suficiencia y las unidades visibles por usuario están en `app/Services/PresupuestoService.php`.
-- `routes/web.php` es el único archivo de rutas de negocio; cada ruta lleva `->middleware('permission:...')`. **No usar `$this->middleware()` en constructores** (el `Controller` base de Laravel 13 no lo tiene).
+- `routes/web.php` es el único archivo de rutas de negocio; cada ruta lleva `->middleware('permission:...')`. **No usar `$this->middleware()` en constructores** (el `Controller` base de Laravel 13 no lo tiene). Las rutas compartidas `/catalogos/{catalogo}` usan `->middleware('catalogo:<accion>')` (`PermisoCatalogo`), que exige el permiso del catálogo de la URL.
+- **Catálogos genéricos** (`app/Catalogos/`): cada catálogo es una entrada en `Catalogos.php` (modelo + `Campo`s); de ahí salen pantalla (`pages/catalogos/Catalogo.tsx`), validación, importación Excel en dos pasos (`Importador`: vista previa → confirmar), historial y permisos. Un catálogo nuevo no necesita controlador ni página propios. Bajas siempre lógicas (`activo`).
+- **Auditoría**: los modelos con el trait `Concerns\Auditable` registran alta/modificación/baja/reactivación en la tabla `auditoria` (pantalla `/auditoria`); `Auditoria::enLote()` agrupa una importación. Los `whereIn(...)->update()` masivos no se auditan.
+- Tablas `cat_egreso_*` / `cat_banco` no tienen AUTO_INCREMENT: sus modelos llevan `$incrementing = false` y `Catalogo::crear()` calcula el id.
 - Esquema híbrido: tablas nuevas Laravel (`proveedores`, `ordenes_compra`, `modificaciones_presupuestales`, `secretarias`) y tablas legadas `tb_egreso_*` / `cat_egreso_*` / `presupuesto 2024` (nombre con espacio). `tb_egreso_requisicion` exige llaves a catálogos legados; el controlador usa el id `1` de cada uno.
 - Una requisición solo es visible para usuarios cuya secretaría tenga asignada la unidad administrativa (`cat_egreso_unidad_administrativa.secretaria_id`); Admin ve todo.
 - Las migraciones **nunca borran información**, se corren por `--path` en servidores, y las que alteran tablas legadas empiezan con `if (! Schema::hasTable(...)) return;` (no existen en SQLite de pruebas).
@@ -55,4 +59,4 @@ SIEG usa los puertos 8001/5174 para correr junto a SIEMG (8000/5173). En el mism
 
 ### Testing
 
-PHPUnit sobre SQLite en memoria; solo hay pruebas de autenticación, ajustes y del panel. Los módulos de egresos no tienen pruebas automatizadas.
+PHPUnit sobre SQLite en memoria; hay pruebas de autenticación, ajustes, panel y catálogos (`tests/Feature/CatalogosTest.php`). Los catálogos sobre tablas del sistema anterior no existen en SQLite (dan 404), así que las pruebas usan los de tablas nuevas (vehículos, cuentas bancarias, firmantes, ejercicios). Requisiciones, órdenes de compra y modificaciones no tienen pruebas automatizadas.

@@ -7,12 +7,14 @@ use App\Models\EgresoRequisicionDetalle;
 use App\Models\EgresoRequisicionBitacora;
 use App\Models\EgresoRequisicionEstado;
 use App\Models\EgresoUnidadAdministrativa;
+use App\Models\EjercicioFiscal;
 use App\Models\PresupuestoEgreso;
 use App\Models\Proveedor;
 use App\Models\ModificacionPresupuestal;
 use App\Services\PresupuestoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Barryvdh\DomPDF\Facade\Pdf;
 
@@ -202,6 +204,11 @@ class EgresoRequisicionController extends Controller
         $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
         if ($idsVisibles !== null && !in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
             abort(403, 'Esa unidad administrativa no pertenece a tu secretaría.');
+        }
+
+        // El folio se numera por el año en curso: si ese ejercicio está cerrado no se admiten requisiciones.
+        if (EjercicioFiscal::estaCerrado((int) date('Y'))) {
+            throw ValidationException::withMessages(['fecha_tramite' => 'El ejercicio fiscal '.date('Y').' está cerrado; ya no admite requisiciones nuevas.']);
         }
 
         $unidad = EgresoUnidadAdministrativa::find($validated['id_cat_egreso_unidad_administrativa']);

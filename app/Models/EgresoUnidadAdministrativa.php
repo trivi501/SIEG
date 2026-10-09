@@ -2,13 +2,18 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class EgresoUnidadAdministrativa extends Model
 {
+    use Auditable;
+
     protected $table = 'cat_egreso_unidad_administrativa';
 
     protected $primaryKey = 'id_cat_egreso_unidad_administrativa';
+
+    public $incrementing = false;
 
     public $timestamps = false;
 
@@ -19,8 +24,20 @@ class EgresoUnidadAdministrativa extends Model
         'nombre',
         'año',
         'activo',
-        'id_cat_area_x_nombre_y_puesto'
+        'id_cat_area_x_nombre_y_puesto',
+        'responsable',
+        'cargo_responsable',
     ];
+
+    protected function casts(): array
+    {
+        return ['activo' => 'boolean'];
+    }
+
+    public function departamentos()
+    {
+        return $this->hasMany(Departamento::class, 'id_cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa');
+    }
 
     public function secretaria()
     {

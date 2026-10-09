@@ -1,5 +1,5 @@
 import { Link, usePage } from '@inertiajs/react';
-import { ChevronRight, Shield, Key, Users, LayoutGrid, Ticket, FileBarChart } from 'lucide-react';
+import { ChevronRight, Shield, Key, Users, LayoutGrid, Ticket, FileBarChart, History } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   SidebarGroup,
@@ -30,6 +30,7 @@ const allAdminItems: AdminItem[] = [
   { title: 'Usuarios', href: '/settings/users', icon: Users, permission: 'users-index' },
   { title: 'Roles', href: '/settings/roles', icon: Shield, permission: 'roles-index' },
   { title: 'Permisos', href: '/settings/permissions', icon: Key, permission: 'permisos-index' },
+  { title: 'Bitácora de auditoría', href: '/auditoria', icon: History, permission: 'auditoria-index' },
   { title: 'Tickets de Soporte', href: '/support-tickets', icon: Ticket, permission: 'tickets-index' },
   { title: 'Logs', href: '/logs', icon: FileBarChart, permission: 'logs-view' },
 ];

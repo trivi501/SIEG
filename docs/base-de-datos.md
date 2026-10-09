@@ -18,6 +18,12 @@ La base se creó el 8 de octubre de 2026 copiando de la base de SIEMG (`laravel`
 | `ordenes_compra` | Orden de compra por requisición y datos de su CFDI |
 | `modificaciones_presupuestales` | Traspasos, reducciones y ampliaciones; origen y destino por clave de línea, para sobrevivir a una re-importación del presupuesto |
 | `secretarias`, `users` | Secretarías (prefijo de folios) y usuarios (`secretaria_id`) |
+| `auditoria` | Bitácora de auditoría de los catálogos: usuario, acción, modelo e id, valores `antes`/`despues` (JSON), `lote` de importación, IP |
+| `cat_egreso_objeto_gasto`, `cat_egreso_fuente_financiamiento`, `cat_egreso_programa` (+`clave`), `cat_egreso_proyecto`, `cat_banco` (+`clave`) | Catálogos del sistema anterior que ahora se administran en `/catalogos`. **No tienen AUTO_INCREMENT**: el id lo calcula la aplicación |
+| `cat_egreso_unidad_administrativa` (+`responsable`, `cargo_responsable`), `departamentos`, `firmantes` | Estructura orgánica: dirección (centro gestor), sus departamentos y los firmantes de los PDF por tipo de documento |
+| `ejercicios_fiscales`, `tipos_documento` | Ejercicios abierto/cerrado; tipos de documento (`requisicion`, `orden_compra`, `modificacion_presupuestal` se crean con la migración) |
+| `proveedor_cuentas` | Cuentas bancarias (CLABE) de `proveedores` |
+| `vehiculos` | Padrón vehicular |
 | `roles`, `permissions`, `model_has_*`, `role_has_permissions` | Spatie (con columnas extra `nombre_mostrar` y `categoria`) |
 | `tb_usuarios`, `cat_areas`, `cat_area_x_nombre_y_puesto`, `cat_pais`, `cat_estado`, `cat_municipio`… | Catálogos del sistema anterior requeridos por llaves foráneas |
 

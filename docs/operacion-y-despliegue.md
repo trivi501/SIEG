@@ -8,7 +8,7 @@ SIEG se instala como una aplicación aparte de SIEMG, con su propio dominio (o s
 2. Clonar el código, `composer install --no-dev --optimize-autoloader`, `npm ci`, `npm run build`.
 3. `.env` con `APP_NAME=SIEG`, `APP_URL` del dominio de SIEG, `DB_DATABASE=sieg` y un `APP_KEY` nuevo (`php artisan key:generate`).
 4. `php artisan migrate:status` y migraciones pendientes por ruta (ver abajo).
-5. `php artisan permissions:sync`.
+5. `php artisan permissions:sync` y `php artisan catalogos:inicializar` (llena fuentes, proyectos y partidas con las claves del presupuesto, los bancos y el ejercicio actual; solo agrega lo que falta).
 6. Crear los roles de egresos (ver [Permisos](permisos.md#perfiles-sugeridos)) y asignarlos.
 7. Servidor web: instalar el sitio de nginx [`deploy/nginx/sieg.conf`](../deploy/nginx/sieg.conf) (las instrucciones están en el encabezado del archivo) y dar permisos de escritura a PHP-FPM: `sudo chown -R www-data:www-data storage bootstrap/cache`.
 8. Quitar los módulos de egresos de SIEMG en producción: actualizar SIEMG a la versión sin egresos.
