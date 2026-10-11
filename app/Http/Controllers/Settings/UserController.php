@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Models\Auditoria;
+use App\Models\EgresoUnidadAdministrativa;
 use App\Models\User;
-use App\Models\Secretaria;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -17,12 +19,12 @@ class UserController extends Controller
     public function index(): Response
     {
         return Inertia::render('settings/users/index', [
-            'users' => User::with('roles', 'secretaria')->paginate(15)->through(fn ($user) => [
+            'users' => User::with('roles', 'unidadAdministrativa')->paginate(15)->through(fn ($user) => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'email_verified_at' => $user->email_verified_at?->diffForHumans(),
-                'secretaria' => $user->secretaria?->nombre,
+                'unidad' => $user->unidadAdministrativa?->nombre,
                 'roles' => $user->roles->pluck('name'),
                 'created_at' => $user->created_at?->diffForHumans(),
             ]),
@@ -36,8 +38,37 @@ class UserController extends Controller
                 'id' => $r->id,
                 'name' => $r->name,
             ]),
-            'secretarias' => Secretaria::orderBy('nombre')->get(['id', 'nombre']),
+            'unidades' => $this->unidades(),
         ]);
+    }
+
+    /**
+     * Secretarías y direcciones para asignar al usuario: una por clave (la del año más reciente),
+     * solo activas.
+     */
+    private function unidades(?int $actual = null): array
+    {
+        if (! Schema::hasTable('cat_egreso_unidad_administrativa')) {
+            return [];
+        }
+
+        // La que ya tiene el usuario siempre aparece (aunque esté inactiva), para no perderla al guardar.
+        return EgresoUnidadAdministrativa::where(fn ($q) => $q->where('activo', true)->orWhere('id_cat_egreso_unidad_administrativa', $actual))
+            ->orderByRaw('id_cat_egreso_unidad_administrativa = ? desc', [$actual ?? 0])
+            ->orderByDesc('año')
+            ->get(['id_cat_egreso_unidad_administrativa', 'clave', 'nombre'])
+            ->unique('clave')
+            ->sortBy('clave')
+            ->map(fn ($u) => ['id' => $u->id_cat_egreso_unidad_administrativa, 'nombre' => "{$u->clave} — {$u->nombre}"])
+            ->values()
+            ->all();
+    }
+
+    private function reglaUnidad(): array
+    {
+        return Schema::hasTable('cat_egreso_unidad_administrativa')
+            ? ['nullable', 'integer', Rule::exists('cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa')]
+            : ['nullable', 'integer'];
     }
 
     public function store(Request $request): RedirectResponse
@@ -48,7 +79,7 @@ class UserController extends Controller
             'password' => 'required|string|min:8',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,id',
-            'secretaria_id' => 'nullable|exists:secretarias,id',
+            'id_cat_egreso_unidad_administrativa' => $this->reglaUnidad(),
         ]);
 
         $user = User::create([
@@ -56,11 +87,11 @@ class UserController extends Controller
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
             'email_verified_at' => now(),
-            'secretaria_id' => $validated['secretaria_id'] ?? null,
+            'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'] ?? null,
         ]);
 
         if (!empty($validated['roles'])) {
-            $user->roles()->sync($validated['roles']);
+            $this->sincronizarRoles($user, $validated['roles']);
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('User created.')]);
@@ -70,21 +101,21 @@ class UserController extends Controller
 
     public function edit(User $user): Response
     {
-        $user->load('roles', 'secretaria');
+        $user->load('roles');
 
         return Inertia::render('settings/users/edit', [
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'secretaria_id' => $user->secretaria_id,
+                'id_cat_egreso_unidad_administrativa' => $user->id_cat_egreso_unidad_administrativa,
                 'roles' => $user->roles->pluck('id'),
             ],
             'roles' => \Spatie\Permission\Models\Role::all()->map(fn ($r) => [
                 'id' => $r->id,
                 'name' => $r->name,
             ]),
-            'secretarias' => Secretaria::orderBy('nombre')->get(['id', 'nombre']),
+            'unidades' => $this->unidades($user->id_cat_egreso_unidad_administrativa),
         ]);
     }
 
@@ -96,13 +127,13 @@ class UserController extends Controller
             'password' => 'nullable|string|min:8',
             'roles' => 'nullable|array',
             'roles.*' => 'exists:roles,id',
-            'secretaria_id' => 'nullable|exists:secretarias,id',
+            'id_cat_egreso_unidad_administrativa' => $this->reglaUnidad(),
         ]);
 
         $user->update([
             'name' => $validated['name'],
             'email' => $validated['email'],
-            'secretaria_id' => $validated['secretaria_id'] ?? null,
+            'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'] ?? null,
         ]);
 
         if (!empty($validated['password'])) {
@@ -110,12 +141,21 @@ class UserController extends Controller
         }
 
         if (isset($validated['roles'])) {
-            $user->roles()->sync($validated['roles']);
+            $this->sincronizarRoles($user, $validated['roles']);
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('User updated.')]);
 
         return to_route('users.index');
+    }
+
+    /** El cambio de roles de un usuario queda en la bitácora de auditoría (por nombre de rol). */
+    private function sincronizarRoles(User $user, array $roles): void
+    {
+        $antes = $user->roles()->pluck('name')->all();
+        $user->roles()->sync($roles);
+
+        Auditoria::relacion($user, 'roles', $antes, $user->roles()->pluck('name')->all());
     }
 
     public function destroy(User $user): RedirectResponse

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Models\Auditoria;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -53,7 +54,7 @@ class RoleController extends Controller
 
         $role = Role::create(['name' => $validated['name']]);
 
-        $role->permissions()->sync($validated['permissions'] ?? []);
+        $this->sincronizarPermisos($role, $validated['permissions'] ?? []);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Role created.')]);
 
@@ -91,11 +92,21 @@ class RoleController extends Controller
 
         $role->update(['name' => $validated['name']]);
 
-        $role->permissions()->sync($validated['permissions'] ?? []);
+        $this->sincronizarPermisos($role, $validated['permissions'] ?? []);
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Role updated.')]);
 
         return to_route('roles.index');
+    }
+
+    /** El cambio de permisos de un rol queda en la bitácora de auditoría (por nombre de permiso). */
+    private function sincronizarPermisos(Role $role, array $permisos): void
+    {
+        $antes = $role->permissions()->pluck('name')->all();
+        $role->permissions()->sync($permisos);
+        $role->forgetCachedPermissions();
+
+        Auditoria::relacion($role, 'permisos', $antes, $role->permissions()->pluck('name')->all());
     }
 
     public function destroy(Role $role): RedirectResponse

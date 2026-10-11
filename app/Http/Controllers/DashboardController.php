@@ -25,7 +25,7 @@ class DashboardController extends Controller
         $claves = PresupuestoService::clavesUnidadVisibles($user);
         $lineas = $presupuesto->lineas($claves);
 
-        $totales = collect(['asignado', 'modificado', 'vigente', 'comprometido', 'en_tramite', 'disponible'])
+        $totales = collect(['asignado', 'modificado', 'vigente', 'en_tramite', 'comprometido', 'devengado', 'pagado', 'disponible'])
             ->mapWithKeys(fn ($campo) => [$campo => round($lineas->sum($campo), 2)]);
 
         $requisiciones = EgresoRequisicion::query()

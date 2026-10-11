@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class EgresoRequisicionDetalle extends Model
 {
+    use Auditable;
+
     protected $table = 'tb_egreso_requisicion_detalle';
 
     protected $primaryKey = 'id_tb_egreso_requisicion_detalle';

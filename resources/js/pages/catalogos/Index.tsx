@@ -46,11 +46,9 @@ function Tarjeta({
 export default function Index({
     grupos,
     catalogos,
-    secretarias,
 }: {
     grupos: string[];
     catalogos: CatalogoResumen[];
-    secretarias: boolean;
 }) {
     return (
         <>
@@ -64,7 +62,7 @@ export default function Index({
                     </p>
                 </div>
 
-                {catalogos.length === 0 && !secretarias && (
+                {catalogos.length === 0 && (
                     <p className="text-sm text-muted-foreground">
                         No tienes acceso a ningún catálogo.
                     </p>
@@ -72,10 +70,8 @@ export default function Index({
 
                 {grupos.map((grupo) => {
                     const delGrupo = catalogos.filter((c) => c.grupo === grupo);
-                    const conSecretarias =
-                        grupo === 'Estructura orgánica' && secretarias;
 
-                    if (delGrupo.length === 0 && !conSecretarias) {
+                    if (delGrupo.length === 0) {
                         return null;
                     }
 
@@ -85,13 +81,6 @@ export default function Index({
                                 {grupo}
                             </h4>
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                                {conSecretarias && (
-                                    <Tarjeta
-                                        href="/secretarias"
-                                        titulo="Secretarías (dependencias)"
-                                        descripcion="Dependencias y las direcciones que tiene asignadas cada una."
-                                    />
-                                )}
                                 {delGrupo.map((c) => (
                                     <Tarjeta
                                         key={c.slug}

@@ -33,14 +33,52 @@ class Auditoria extends Model
         }
     }
 
-    public static function registrar(Model $modelo, string $accion, ?array $antes, ?array $despues): void
+    public const ACCIONES = [
+        'alta', 'modificación', 'baja', 'reactivación', 'eliminación',
+        'inicio de sesión', 'cierre de sesión', 'acceso fallido',
+    ];
+
+    public static function registrar(Model $modelo, string $accion, ?array $antes, ?array $despues, ?string $descripcion = null): void
+    {
+        self::escribir($modelo::class, (string) $modelo->getKey(), $accion, $antes, $despues, $descripcion, auth()->id());
+    }
+
+    /**
+     * Cambios de relaciones muchos a muchos (roles de un usuario, permisos de un rol, unidades de una
+     * secretaría), que no disparan eventos de modelo. Solo registra si la lista cambió.
+     */
+    public static function relacion(Model $modelo, string $campo, array $antes, array $despues): void
+    {
+        sort($antes);
+        sort($despues);
+
+        if ($antes !== $despues) {
+            self::registrar($modelo, 'modificación', [$campo => implode(', ', $antes)], [$campo => implode(', ', $despues)]);
+        }
+    }
+
+    /** Inicio y cierre de sesión e intentos fallidos. */
+    public static function acceso(string $accion, ?Model $usuario, ?string $descripcion = null): void
+    {
+        self::escribir(
+            User::class,
+            (string) ($usuario?->getKey() ?? ''),
+            $accion,
+            null,
+            null,
+            $descripcion,
+            $accion === 'acceso fallido' ? null : $usuario?->getKey(),
+        );
+    }
+
+    private static function escribir(string $tipo, string $id, string $accion, ?array $antes, ?array $despues, ?string $descripcion, ?int $usuarioId): void
     {
         static::create([
-            'user_id' => auth()->id(),
+            'user_id' => $usuarioId,
             'accion' => $accion,
-            'auditable_type' => $modelo::class,
-            'auditable_id' => (string) $modelo->getKey(),
-            'descripcion' => self::$loteActual['descripcion'] ?? null,
+            'auditable_type' => $tipo,
+            'auditable_id' => $id,
+            'descripcion' => $descripcion !== null ? mb_substr($descripcion, 0, 300) : (self::$loteActual['descripcion'] ?? null),
             'antes' => $antes,
             'despues' => $despues,
             'lote' => self::$loteActual['lote'] ?? null,

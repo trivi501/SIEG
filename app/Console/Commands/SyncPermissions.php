@@ -17,9 +17,6 @@ class SyncPermissions extends Command
     public function handle(): int
     {
         $permissions = [
-            // Secretarías
-            'secretarias-index', 'secretarias-create', 'secretarias-edit', 'secretarias-delete',
-
             // Logs
             'logs-view',
 
@@ -27,13 +24,15 @@ class SyncPermissions extends Command
             'tickets-index', 'tickets-create', 'tickets-update',
 
             // Presupuesto
-            'presupuesto-index', 'presupuesto-edit', 'presupuesto-import', 'presupuesto-delete',
+            'presupuesto-index', 'presupuesto-create', 'presupuesto-edit', 'presupuesto-import', 'presupuesto-delete', 'presupuesto-correr-saldos',
 
             // Requisiciones
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-delete', 'requisiciones-suficiencia',
+            'requisiciones-clc', // el área genera la CLC cuando la orden de compra ya tiene factura
+            'requisiciones-extemporaneas', // Subdirección Administrativa: autoriza las capturadas fuera del periodo
 
             // Órdenes de compra (Recursos Materiales)
-            'ordenes-compra-create',
+            'ordenes-compra-create', 'ordenes-compra-pagar',
 
             // Modificaciones presupuestales
             'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar',
@@ -63,7 +62,8 @@ class SyncPermissions extends Command
         foreach (Catalogos::todos() as $catalogo) {
             foreach ($acciones as $accion => $verbo) {
                 Permission::where('name', "{$catalogo->prefijoPermiso()}-{$accion}")
-                    ->whereNull('nombre_mostrar')
+                    // Sin nombre, o con el que puso este comando (se actualiza si cambió el título del catálogo).
+                    ->where(fn ($q) => $q->whereNull('nombre_mostrar')->orWhere('nombre_mostrar', 'like', "{$verbo}: %"))
                     ->update(['nombre_mostrar' => "{$verbo}: {$catalogo->titulo}", ...($conCategoria ? ['categoria' => 'Catálogos'] : [])]);
             }
         }

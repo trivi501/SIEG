@@ -1,13 +1,10 @@
 import { Head, Link, router } from '@inertiajs/react';
-import { Plus, Eye, Pencil, Download, Search, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Plus, Eye, Pencil, Download, Search, Send, X } from 'lucide-react';
+import { useRef, useState } from 'react';
+import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
     TableBody,
@@ -16,8 +13,6 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { useState } from 'react';
-import SuficienciaBadge from '@/components/suficiencia-badge';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -33,36 +28,103 @@ interface Requisicion {
     observaciones: string | null;
     id_cat_egreso_requisicion_estado: number;
     cat_egreso_requisicion_estado?: { descripcion: string } | null;
+    cat_egreso_unidad_administrativa?: { clave: string; nombre: string } | null;
     suficiencia?: boolean | null;
+    extemporanea?: boolean | null;
+    extemporanea_autorizada_at?: string | null;
     orden_compra?: { folio_completo: string; xml_uuid: string | null } | null;
 }
 
-export default function Index({ requisiciones, estados, filters }: { requisiciones: { data: Requisicion[] }; estados: { id_cat_egreso_requisicion_estado: number; descripcion: string }[]; filters: Record<string, string> }) {
+export default function Index({
+    requisiciones,
+    estados,
+    filters,
+}: {
+    requisiciones: { data: Requisicion[] };
+    estados: {
+        id_cat_egreso_requisicion_estado: number;
+        descripcion: string;
+    }[];
+    filters: Record<string, string>;
+}) {
     const [f, setF] = useState({
         folio: filters?.folio ?? '',
         folio_completo: filters?.folio_completo ?? '',
+        unidad: filters?.unidad ?? '',
         concepto: filters?.concepto ?? '',
         estado: filters?.estado ?? '',
         año: filters?.año ?? '',
     });
 
-    const aplicar = () => {
+    const aplicar = (valores: typeof f) => {
         const params: Record<string, string> = {};
-        if (f.folio) params.folio = f.folio;
-        if (f.folio_completo) params.folio_completo = f.folio_completo;
-        if (f.concepto) params.concepto = f.concepto;
-        if (f.estado) params.estado = f.estado;
-        if (f.año) params.año = f.año;
-        router.get('/requisiciones', params, { preserveState: true, replace: true });
+
+        if (valores.folio) {
+            params.folio = valores.folio;
+        }
+
+        if (valores.folio_completo) {
+            params.folio_completo = valores.folio_completo;
+        }
+
+        if (valores.unidad) {
+            params.unidad = valores.unidad;
+        }
+
+        if (valores.concepto) {
+            params.concepto = valores.concepto;
+        }
+
+        if (valores.estado) {
+            params.estado = valores.estado;
+        }
+
+        if (valores.año) {
+            params.año = valores.año;
+        }
+
+        router.get('/requisiciones', params, {
+            preserveState: true,
+            replace: true,
+        });
+    };
+
+    // Cada filtro busca solo: el estado al momento y el texto al dejar de escribir.
+    const espera = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const cambiar = (
+        campo: keyof typeof f,
+        valor: string,
+        inmediato = false,
+    ) => {
+        const nuevo = { ...f, [campo]: valor };
+        setF(nuevo);
+        clearTimeout(espera.current);
+
+        if (inmediato) {
+            aplicar(nuevo);
+        } else {
+            espera.current = setTimeout(() => aplicar(nuevo), 400);
+        }
     };
 
     const limpiar = () => {
-        setF({ folio: '', folio_completo: '', concepto: '', estado: '', año: '' });
+        clearTimeout(espera.current);
+        setF({
+            folio: '',
+            folio_completo: '',
+            unidad: '',
+            concepto: '',
+            estado: '',
+            año: '',
+        });
         router.get('/requisiciones', {}, { replace: true });
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') aplicar();
+        if (e.key === 'Enter') {
+            clearTimeout(espera.current);
+            aplicar(f);
+        }
     };
 
     return (
@@ -73,7 +135,9 @@ export default function Index({ requisiciones, estados, filters }: { requisicion
                     <h3 className="text-lg font-medium">Requisiciones</h3>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" asChild>
-                            <Link href="/requisiciones/gasto">Cómo va el gasto</Link>
+                            <Link href="/requisiciones/gasto">
+                                Ejercicio y control del gasto
+                            </Link>
                         </Button>
                         <Button asChild>
                             <Link href="/requisiciones/crear">
@@ -95,40 +159,136 @@ export default function Index({ requisiciones, estados, filters }: { requisicion
                                     <TableHead className="p-2">
                                         Folio
                                         <div className="mt-1 flex gap-1">
-                                            <input value={f.folio} onChange={(e) => setF({ ...f, folio: e.target.value })} onKeyDown={handleKeyDown} placeholder="..." className="w-16 rounded border-input px-1 py-0.5 text-xs shadow-sm" />
+                                            <input
+                                                value={f.folio}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'folio',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                onKeyDown={handleKeyDown}
+                                                placeholder="..."
+                                                className="w-16 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            />
                                         </div>
                                     </TableHead>
                                     <TableHead className="p-2">
                                         Folio Completo
                                         <div className="mt-1 flex gap-1">
-                                            <input value={f.folio_completo} onChange={(e) => setF({ ...f, folio_completo: e.target.value })} onKeyDown={handleKeyDown} placeholder="..." className="w-24 rounded border-input px-1 py-0.5 text-xs shadow-sm" />
+                                            <input
+                                                value={f.folio_completo}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'folio_completo',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                onKeyDown={handleKeyDown}
+                                                placeholder="..."
+                                                className="w-24 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            />
+                                        </div>
+                                    </TableHead>
+                                    <TableHead className="p-2">
+                                        Secretaría / Unidad administrativa
+                                        <div className="mt-1 flex gap-1">
+                                            <input
+                                                value={f.unidad}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'unidad',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                onKeyDown={handleKeyDown}
+                                                placeholder="Clave o nombre..."
+                                                className="w-36 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            />
                                         </div>
                                     </TableHead>
                                     <TableHead className="p-2">
                                         Estado
                                         <div className="mt-1">
-                                            <select value={f.estado} onChange={(e) => { setF({ ...f, estado: e.target.value }); setTimeout(aplicar, 50); }} className="w-28 rounded border-input px-1 py-0.5 text-xs shadow-sm">
+                                            <select
+                                                value={f.estado}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'estado',
+                                                        e.target.value,
+                                                        true,
+                                                    )
+                                                }
+                                                className="w-28 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            >
                                                 <option value="">Todos</option>
-                                                {estados.map((e) => <option key={e.id_cat_egreso_requisicion_estado} value={e.id_cat_egreso_requisicion_estado}>{e.descripcion}</option>)}
+                                                {estados.map((e) => (
+                                                    <option
+                                                        key={
+                                                            e.id_cat_egreso_requisicion_estado
+                                                        }
+                                                        value={
+                                                            e.id_cat_egreso_requisicion_estado
+                                                        }
+                                                    >
+                                                        {e.descripcion}
+                                                    </option>
+                                                ))}
                                             </select>
                                         </div>
                                     </TableHead>
                                     <TableHead className="p-2">
                                         Concepto
                                         <div className="mt-1 flex gap-1">
-                                            <input value={f.concepto} onChange={(e) => setF({ ...f, concepto: e.target.value })} onKeyDown={handleKeyDown} placeholder="..." className="w-32 rounded border-input px-1 py-0.5 text-xs shadow-sm" />
+                                            <input
+                                                value={f.concepto}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'concepto',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                onKeyDown={handleKeyDown}
+                                                placeholder="..."
+                                                className="w-32 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            />
                                         </div>
                                     </TableHead>
                                     <TableHead className="p-2">
                                         Registro
                                         <div className="mt-1 flex gap-1">
-                                            <input value={f.año} onChange={(e) => setF({ ...f, año: e.target.value })} onKeyDown={handleKeyDown} placeholder="Año" className="w-14 rounded border-input px-1 py-0.5 text-xs shadow-sm" />
+                                            <input
+                                                value={f.año}
+                                                onChange={(e) =>
+                                                    cambiar(
+                                                        'año',
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                onKeyDown={handleKeyDown}
+                                                placeholder="Año"
+                                                className="w-14 rounded border-input px-1 py-0.5 text-xs shadow-sm"
+                                            />
                                         </div>
                                     </TableHead>
                                     <TableHead className="p-2">
                                         <div className="flex items-center gap-1">
-                                            <Button size="sm" variant="ghost" className="h-6 px-1" onClick={aplicar}><Search className="h-3 w-3" /></Button>
-                                            <Button size="sm" variant="ghost" className="h-6 px-1" onClick={limpiar}><X className="h-3 w-3" /></Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-6 px-1"
+                                                onClick={() => aplicar(f)}
+                                            >
+                                                <Search className="h-3 w-3" />
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-6 px-1"
+                                                onClick={limpiar}
+                                            >
+                                                <X className="h-3 w-3" />
+                                            </Button>
                                         </div>
                                     </TableHead>
                                 </TableRow>
@@ -136,24 +296,88 @@ export default function Index({ requisiciones, estados, filters }: { requisicion
                             <TableBody>
                                 {requisiciones.data.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                        <TableCell
+                                            colSpan={7}
+                                            className="text-center text-muted-foreground"
+                                        >
                                             No hay requisiciones registradas.
                                         </TableCell>
                                     </TableRow>
                                 )}
                                 {requisiciones.data.map((req) => (
-                                    <TableRow key={req.id_tb_egreso_requisicion}>
-                                        <TableCell className="font-medium">{req.folio}</TableCell>
-                                        <TableCell>{req.folio_completo}</TableCell>
+                                    <TableRow
+                                        key={req.id_tb_egreso_requisicion}
+                                    >
+                                        <TableCell className="font-medium">
+                                            {req.folio}
+                                        </TableCell>
+                                        <TableCell>
+                                            {req.folio_completo}
+                                        </TableCell>
+                                        <TableCell className="max-w-56 text-xs whitespace-normal">
+                                            {req.cat_egreso_unidad_administrativa ? (
+                                                <>
+                                                    <span className="font-mono text-muted-foreground">
+                                                        {
+                                                            req
+                                                                .cat_egreso_unidad_administrativa
+                                                                .clave
+                                                        }
+                                                    </span>{' '}
+                                                    {
+                                                        req
+                                                            .cat_egreso_unidad_administrativa
+                                                            .nombre
+                                                    }
+                                                </>
+                                            ) : (
+                                                '—'
+                                            )}
+                                        </TableCell>
                                         <TableCell>
                                             <div className="flex flex-wrap items-center gap-1">
                                                 <Badge variant="secondary">
-                                                    {req.cat_egreso_requisicion_estado?.descripcion ?? '—'}
+                                                    {req
+                                                        .cat_egreso_requisicion_estado
+                                                        ?.descripcion ?? '—'}
                                                 </Badge>
-                                                <SuficienciaBadge suficiencia={req.suficiencia} />
+                                                <SuficienciaBadge
+                                                    suficiencia={
+                                                        req.suficiencia
+                                                    }
+                                                />
+                                                {!!req.extemporanea && (
+                                                    <Badge
+                                                        variant="secondary"
+                                                        className={
+                                                            req.extemporanea_autorizada_at
+                                                                ? 'bg-green-100 text-green-800'
+                                                                : 'bg-amber-100 text-amber-900'
+                                                        }
+                                                    >
+                                                        {req.extemporanea_autorizada_at
+                                                            ? 'Extemporánea autorizada'
+                                                            : 'Extemporánea por autorizar'}
+                                                    </Badge>
+                                                )}
                                                 {req.orden_compra && (
-                                                    <Badge variant="outline" title={req.orden_compra.xml_uuid ? 'Factura cargada' : 'Factura pendiente'}>
-                                                        {req.orden_compra.folio_completo}{req.orden_compra.xml_uuid ? ' · facturada' : ''}
+                                                    <Badge
+                                                        variant="outline"
+                                                        title={
+                                                            req.orden_compra
+                                                                .xml_uuid
+                                                                ? 'Factura cargada'
+                                                                : 'Factura pendiente'
+                                                        }
+                                                    >
+                                                        {
+                                                            req.orden_compra
+                                                                .folio_completo
+                                                        }
+                                                        {req.orden_compra
+                                                            .xml_uuid
+                                                            ? ' · facturada'
+                                                            : ''}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -161,26 +385,74 @@ export default function Index({ requisiciones, estados, filters }: { requisicion
                                         <TableCell className="max-w-xs truncate text-muted-foreground">
                                             {req.observaciones || '—'}
                                         </TableCell>
-                                        <TableCell className="text-muted-foreground text-xs">
+                                        <TableCell className="text-xs text-muted-foreground">
                                             {req.registro ?? '—'}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-1">
-                                                <Button variant="ghost" size="icon" asChild>
-                                                    <Link href={`/requisiciones/${req.id_tb_egreso_requisicion}`}>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    asChild
+                                                >
+                                                    <Link
+                                                        href={`/requisiciones/${req.id_tb_egreso_requisicion}`}
+                                                    >
                                                         <Eye className="h-4 w-4" />
                                                     </Link>
                                                 </Button>
-                                                {(req.id_cat_egreso_requisicion_estado === 1 || req.id_cat_egreso_requisicion_estado === 4) && (
-                                                    <Button variant="ghost" size="icon" asChild>
-                                                        <Link href={`/requisiciones/${req.id_tb_egreso_requisicion}/edit`}>
+                                                {(req.id_cat_egreso_requisicion_estado ===
+                                                    1 ||
+                                                    req.id_cat_egreso_requisicion_estado ===
+                                                        4) && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        asChild
+                                                    >
+                                                        <Link
+                                                            href={`/requisiciones/${req.id_tb_egreso_requisicion}/edit`}
+                                                        >
                                                             <Pencil className="h-4 w-4" />
                                                         </Link>
                                                     </Button>
                                                 )}
-                                                {[3, 5, 6].includes(req.id_cat_egreso_requisicion_estado) && (
-                                                    <Button variant="ghost" size="icon" asChild>
-                                                        <a href={`/requisiciones/${req.id_tb_egreso_requisicion}/pdf`} target="_blank">
+                                                {req.id_cat_egreso_requisicion_estado ===
+                                                    3 && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        title="Enviar a Recursos Materiales"
+                                                        onClick={() =>
+                                                            confirm(
+                                                                `¿Enviar ${req.folio_completo} a Recursos Materiales?`,
+                                                            ) &&
+                                                            router.post(
+                                                                `/requisiciones/${req.id_tb_egreso_requisicion}/recursos-materiales`,
+                                                                {},
+                                                                {
+                                                                    preserveScroll: true,
+                                                                },
+                                                            )
+                                                        }
+                                                    >
+                                                        <Send className="mr-1 h-4 w-4" />{' '}
+                                                        A Recursos Materiales
+                                                    </Button>
+                                                )}
+                                                {(req.id_cat_egreso_requisicion_estado ===
+                                                    3 ||
+                                                    req.id_cat_egreso_requisicion_estado >=
+                                                        5) && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        asChild
+                                                    >
+                                                        <a
+                                                            href={`/requisiciones/${req.id_tb_egreso_requisicion}/pdf`}
+                                                            target="_blank"
+                                                        >
                                                             <Download className="h-4 w-4" />
                                                         </a>
                                                     </Button>

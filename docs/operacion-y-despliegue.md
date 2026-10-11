@@ -31,7 +31,13 @@ php artisan queue:restart
 ## Procesos
 
 - **Worker de la cola** (`php artisan queue:work`): la app no encola trabajos propios hoy, pero las notificaciones y futuros procesos lo usan; se recomienda dejarlo como servicio.
-- SIEG **no tiene tareas programadas**; no requiere el cron del scheduler.
+- **Cron del scheduler (obligatorio)**: la corrida de saldos del presupuesto se ejecuta sola el **día 1 de cada mes a las 00:05** (hora de México) con `presupuesto:correr-saldos`. Requiere en el servidor la línea de cron de Laravel, como el usuario del sitio (`sudo crontab -u www-data -e`):
+
+  ```
+  * * * * * cd /var/www/SIEG && php artisan schedule:run >> /dev/null 2>&1
+  ```
+
+  `php artisan schedule:list` muestra la próxima ejecución. Si el cron no corrió, se puede correr a mano con el botón *Correr saldos* o con `php artisan presupuesto:correr-saldos` (`--mes=AAAA-MM` para otro mes, `--forzar` para recalcular uno ya corrido).
 
 ## Archivos generados
 
@@ -45,7 +51,7 @@ php artisan queue:restart
 | Síntoma | Revisar |
 |---|---|
 | Un menú o pantalla no aparece para nadie | El permiso no está en `SyncPermissions.php` o falta correr `permissions:sync` |
-| El área no ve unidades al crear una requisición | El usuario no tiene secretaría o la secretaría no tiene unidades administrativas |
+| El área no ve unidades al crear una requisición | El usuario no tiene secretaría o dirección asignada (Administración → Usuarios) |
 | No aparecen partidas al capturar | La unidad no tiene líneas en el presupuesto importado, o ninguna tiene disponible |
 | Errores 419 al guardar en desarrollo | SIEG y SIEMG abiertos con el mismo host; usar `localhost` para uno y `127.0.0.1` para el otro |
 | La factura XML se rechaza | El mensaje indica la causa: total distinto de lo cotizado, RFC del emisor distinto al del proveedor, XML sin timbre o UUID ya usado |

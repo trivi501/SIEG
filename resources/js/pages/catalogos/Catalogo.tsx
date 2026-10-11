@@ -286,7 +286,7 @@ export default function Catalogo({
         const ancho =
             campo.tipo === 'texto_largo' ||
             (campo.tipo === 'texto' && (campo.max ?? 0) > 200)
-                ? 'sm:col-span-2'
+                ? 'sm:col-span-2 lg:col-span-3'
                 : '';
 
         if (campo.tipo === 'booleano') {
@@ -625,7 +625,7 @@ export default function Catalogo({
 
             {/* Alta / edición */}
             <Dialog open={abierto} onOpenChange={setAbierto}>
-                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
                     <form onSubmit={guardar} className="space-y-4">
                         <DialogHeader>
                             <DialogTitle>
@@ -638,7 +638,7 @@ export default function Catalogo({
                                 </DialogDescription>
                             )}
                         </DialogHeader>
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             {editables.map(control)}
                         </div>
                         <DialogFooter>
@@ -736,6 +736,7 @@ export default function Catalogo({
                                     despues={m.despues}
                                     etiquetas={etiquetas}
                                     opciones={opciones}
+                                    soloEtiquetados
                                 />
                             </li>
                         ))}

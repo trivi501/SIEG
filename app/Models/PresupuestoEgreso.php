@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class PresupuestoEgreso extends Model
 {
+    use Auditable;
+
     protected $table = 'presupuesto 2024';
 
     protected $primaryKey = 'id_presupuesto';

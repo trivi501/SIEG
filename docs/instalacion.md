@@ -85,7 +85,7 @@ php artisan tinker
 >>> $u->assignRole('Super Admin');
 ```
 
-Para que un usuario de un área vea requisiciones y presupuesto, debe tener **secretaría** asignada y la secretaría sus **unidades administrativas** (Secretarías → Editar).
+Para que un usuario de un área vea requisiciones y presupuesto, debe tener asignada su **secretaría o dirección** (Administración → Usuarios → Editar).
 
 ## Verificación
 

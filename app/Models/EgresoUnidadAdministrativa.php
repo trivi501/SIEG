@@ -27,6 +27,7 @@ class EgresoUnidadAdministrativa extends Model
         'id_cat_area_x_nombre_y_puesto',
         'responsable',
         'cargo_responsable',
+        'prefijo',
     ];
 
     protected function casts(): array
@@ -39,9 +40,20 @@ class EgresoUnidadAdministrativa extends Model
         return $this->hasMany(Departamento::class, 'id_cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa');
     }
 
-    public function secretaria()
+    public function usuarios()
     {
-        return $this->belongsTo(Secretaria::class, 'secretaria_id', 'id');
+        return $this->hasMany(User::class, 'id_cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa');
+    }
+
+    /**
+     * Ids de todas las unidades con la misma clave (la misma secretaría o dirección en distintos años):
+     * es lo que ve un usuario asignado a la unidad $id.
+     */
+    public static function idsMismaClave(?int $id): array
+    {
+        $clave = $id ? static::whereKey($id)->value('clave') : null;
+
+        return $clave === null ? [] : static::where('clave', $clave)->pluck('id_cat_egreso_unidad_administrativa')->all();
     }
 
     public function tbEgresoFacturas()

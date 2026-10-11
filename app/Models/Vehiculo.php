@@ -16,7 +16,7 @@ class Vehiculo extends Model
     ];
 
     protected $fillable = [
-        'numero_economico', 'placas', 'serie', 'marca', 'linea', 'modelo', 'color', 'tipo', 'secretaria_id',
+        'numero_economico', 'placas', 'serie', 'marca', 'linea', 'modelo', 'color', 'tipo', 'id_cat_egreso_unidad_administrativa',
         'resguardante', 'cargo_resguardante', 'numero_resguardo', 'fecha_resguardo', 'estado', 'observaciones', 'activo',
     ];
 
@@ -25,8 +25,8 @@ class Vehiculo extends Model
         return ['activo' => 'boolean', 'fecha_resguardo' => 'date', 'modelo' => 'integer'];
     }
 
-    public function secretaria()
+    public function unidadAdministrativa()
     {
-        return $this->belongsTo(Secretaria::class);
+        return $this->belongsTo(EgresoUnidadAdministrativa::class, 'id_cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa');
     }
 }

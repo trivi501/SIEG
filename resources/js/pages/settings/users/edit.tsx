@@ -22,11 +22,11 @@ type User = {
     id: number;
     name: string;
     email: string;
-    secretaria_id: number | null;
+    id_cat_egreso_unidad_administrativa: number | null;
     roles: number[];
 };
 
-export default function Edit({ user, roles, secretarias }: { user: User; roles: Role[]; secretarias: { id: number; nombre: string }[] }) {
+export default function Edit({ user, roles, unidades }: { user: User; roles: Role[]; unidades: { id: number; nombre: string }[] }) {
     return (
         <>
             <Head title="Edit User" />
@@ -98,18 +98,21 @@ export default function Edit({ user, roles, secretarias }: { user: User; roles: 
                                     </div>
 
                                     <div className="grid gap-2">
-                                        <Label htmlFor="secretaria_id">Secretar├¡a</Label>
+                                        <Label htmlFor="id_cat_egreso_unidad_administrativa">Secretaría o dirección</Label>
                                         <select
-                                            id="secretaria_id"
-                                            name="secretaria_id"
-                                            defaultValue={user.secretaria_id ?? ''}
+                                            id="id_cat_egreso_unidad_administrativa"
+                                            name="id_cat_egreso_unidad_administrativa"
+                                            defaultValue={user.id_cat_egreso_unidad_administrativa ?? ''}
                                             className="block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring"
                                         >
-                                            <option value="">Sin secretar├¡a</option>
-                                            {secretarias.map((s) => (
-                                                <option key={s.id} value={s.id}>{s.nombre}</option>
+                                            <option value="">Sin asignar</option>
+                                            {unidades.map((u) => (
+                                                <option key={u.id} value={u.id}>{u.nombre}</option>
                                             ))}
                                         </select>
+                                        <p className="text-xs text-muted-foreground">
+                                            Solo verá las requisiciones y el presupuesto de esta secretaría o dirección.
+                                        </p>
                                     </div>
 
                                     <div className="grid gap-2">

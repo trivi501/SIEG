@@ -136,6 +136,23 @@ class CatalogosTest extends TestCase
         $this->assertSame('123456', ProveedorCuenta::where('principal', true)->value('cuenta'));
     }
 
+    public function test_proveedor_lleva_su_cuenta_bancaria()
+    {
+        $this->actingAs($this->admin());
+        $datos = ['nombre' => 'PAPELERÍA', 'rfc' => 'PAP010101AB1', 'activo' => true];
+
+        $this->post('/catalogos/proveedores', [...$datos, 'clabe' => '032180000118359718'])->assertSessionHasErrors('clabe');
+        $this->post('/catalogos/proveedores', [...$datos, 'cuenta_bancaria' => '12-34'])->assertSessionHasErrors('cuenta_bancaria');
+
+        $this->post('/catalogos/proveedores', [...$datos, 'clabe' => '032180000118359719', 'cuenta_bancaria' => '0118359719'])
+            ->assertSessionHasNoErrors();
+        $proveedor = Proveedor::firstOrFail();
+        $this->assertSame(['032180000118359719', '0118359719'], [$proveedor->clabe, $proveedor->cuenta_bancaria]);
+
+        // Otra alta con la misma CLABE no procede.
+        $this->post('/catalogos/proveedores', ['nombre' => 'OTRO', 'clabe' => '032180000118359719', 'activo' => true])->assertSessionHasErrors('clabe');
+    }
+
     public function test_importacion_revisa_antes_de_guardar()
     {
         $this->actingAs($this->admin());

@@ -11,7 +11,7 @@ class Proveedor extends Model
 
     protected $table = 'proveedores';
 
-    protected $fillable = ['nombre', 'rfc', 'correo', 'telefono', 'domicilio', 'activo'];
+    protected $fillable = ['nombre', 'rfc', 'correo', 'telefono', 'domicilio', 'id_cat_banco', 'clabe', 'cuenta_bancaria', 'activo'];
 
     protected function casts(): array
     {
@@ -21,6 +21,11 @@ class Proveedor extends Model
     public function ordenesCompra()
     {
         return $this->hasMany(OrdenCompra::class);
+    }
+
+    public function banco()
+    {
+        return $this->belongsTo(Banco::class, 'id_cat_banco', 'id_cat_banco');
     }
 
     public function cuentas()

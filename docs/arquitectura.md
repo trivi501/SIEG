@@ -22,7 +22,7 @@ SIEG nació como copia de **SIEMG** (`C:\laragon\www\siemg`), del que se quitaro
 app/
   Console/Commands/      SyncPermissions
   Http/Controllers/      Presupuesto, Requisiciones, Órdenes de compra, Proveedores,
-                         Modificaciones presupuestales, Secretarías, Dashboard, Settings, Tickets
+                         Modificaciones presupuestales, Catálogos, Auditoría, Dashboard, Settings, Tickets
   Http/Middleware/       HandleInertiaRequests: props compartidos (usuario, permisos, flash)
   Models/                Modelos (muchos apuntan a tablas tb_egreso_* / cat_egreso_*)
   Services/              PresupuestoService
@@ -42,7 +42,7 @@ routes/web.php           Todas las rutas, con su permiso
 
 **Catálogos genéricos.** `app/Catalogos/` declara cada catálogo (`Catalogos.php`) con sus campos (`Campo`: texto, entero, fecha, booleano, selección, relación, calculado). De esa definición salen la pantalla `pages/catalogos/Catalogo.tsx`, la validación, la plantilla e importación (`Importador`), el historial y los permisos; `CatalogoController` atiende todos. Para un catálogo nuevo basta el modelo (con el trait `Auditable`), su migración y la entrada en `Catalogos.php`. Las tablas del sistema anterior no tienen AUTO_INCREMENT: el modelo lleva `$incrementing = false` y `Catalogo::crear()` calcula el siguiente id; las columnas obligatorias que no se capturan van en `valoresFijos`.
 
-**Auditoría.** El trait `App\Models\Concerns\Auditable` escribe en `auditoria` cada alta, modificación, baja/reactivación (cambio de `activo`) y eliminación, con los valores anterior y nuevo. `Auditoria::enLote()` agrupa los cambios de una importación. Los `update()` masivos (`whereIn(...)->update()`) no generan eventos y no quedan auditados.
+**Auditoría.** La bitácora cubre todo el sistema. El trait `App\Models\Concerns\Auditable` (que delega en `App\Observers\AuditoriaObserver`) escribe en `auditoria` cada alta, modificación, baja/reactivación (cambio de `activo`) y eliminación, con los valores anterior y nuevo; lo llevan requisiciones y sus conceptos, órdenes de compra, modificaciones presupuestales, líneas del presupuesto, catálogos, secretarías, usuarios y tickets. `AppServiceProvider` observa los roles y permisos de Spatie y escucha los eventos de acceso (inicio y cierre de sesión, intento fallido con el correo usado). Los atributos ocultos del modelo (contraseña, secretos de doble factor) quedan como `[oculto]`. `Auditoria::relacion()` registra cambios de relaciones muchos a muchos (roles de un usuario, permisos de un rol) y `Auditoria::enLote()` agrupa importaciones y borrados masivos (p. ej. *Eliminar todo el presupuesto* guarda cada línea borrada). Los `update()`/`delete()` masivos (`whereIn(...)->update()`) no generan eventos: el código recorre los modelos uno por uno.
 
 **Transacciones.** Requisición con sus conceptos, validación de suficiencia, orden de compra y autorización de modificaciones van dentro de `DB::transaction()`; la suficiencia y los folios usan `lockForUpdate()` para que dos usuarios no comprometan el mismo saldo ni repitan folio.
 

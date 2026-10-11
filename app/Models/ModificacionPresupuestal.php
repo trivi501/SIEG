@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use App\Services\PresupuestoService;
 use Illuminate\Database\Eloquent\Model;
 
 class ModificacionPresupuestal extends Model
 {
+    use Auditable;
+
     protected $table = 'modificaciones_presupuestales';
 
     public const TIPOS = [
@@ -17,8 +20,8 @@ class ModificacionPresupuestal extends Model
 
     protected $fillable = [
         'folio', 'año', 'folio_completo', 'tipo', 'estado',
-        'origen_clave', 'origen_fuente', 'origen_proyecto', 'origen_partida', 'origen_descripcion',
-        'destino_clave', 'destino_fuente', 'destino_proyecto', 'destino_partida', 'destino_descripcion',
+        'origen_clave', 'origen_fuente', 'origen_proyecto', 'origen_partida', 'origen_descripcion', 'origen_mes',
+        'destino_clave', 'destino_fuente', 'destino_proyecto', 'destino_partida', 'destino_descripcion', 'destino_mes',
         'importe', 'justificacion', 'id_tb_egreso_requisicion',
         'solicitante_id', 'autorizador_id', 'resuelto_at', 'observaciones_resolucion',
         'origen_disponible_antes', 'destino_vigente_antes',
@@ -29,6 +32,8 @@ class ModificacionPresupuestal extends Model
         return [
             'importe' => 'float',
             'resuelto_at' => 'datetime',
+            'origen_mes' => 'integer',
+            'destino_mes' => 'integer',
             'origen_disponible_antes' => 'float',
             'destino_vigente_antes' => 'float',
         ];

@@ -11,6 +11,9 @@ const ACCIONES: Record<
     baja: 'destructive',
     reactivación: 'outline',
     eliminación: 'destructive',
+    'inicio de sesión': 'outline',
+    'cierre de sesión': 'outline',
+    'acceso fallido': 'destructive',
 };
 
 export function AccionBadge({ accion }: { accion: string }) {
@@ -39,18 +42,19 @@ export default function CambiosAuditoria({
     despues,
     etiquetas = {},
     opciones = {},
+    soloEtiquetados = false,
 }: {
     antes: Valores;
     despues: Valores;
     etiquetas?: Record<string, string>;
     /** campo → (valor guardado → texto), para mostrar nombres en lugar de ids o claves. */
     opciones?: Record<string, Record<string, string>>;
+    /** Solo los campos con etiqueta (en catálogos oculta columnas internas de tablas anteriores). */
+    soloEtiquetados?: boolean;
 }) {
-    // Con etiquetas se muestran solo los campos del catálogo (no columnas internas de tablas anteriores).
-    const conEtiquetas = Object.keys(etiquetas).length > 0;
     const campos = Array.from(
         new Set([...Object.keys(antes ?? {}), ...Object.keys(despues ?? {})]),
-    ).filter((c) => !conEtiquetas || c in etiquetas);
+    ).filter((c) => !soloEtiquetados || c in etiquetas);
     const mostrar = (campo: string, v: unknown) =>
         v !== null && v !== undefined && opciones[campo]?.[String(v)]
             ? opciones[campo][String(v)]

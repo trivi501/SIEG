@@ -6,7 +6,7 @@ Además, los datos se acotan:
 
 | Módulo | Regla |
 |---|---|
-| Requisiciones, Cómo va el gasto, Panel | Solo las unidades administrativas de la secretaría del usuario. Admin y Super Admin ven todo |
+| Requisiciones, Ejercicio y control del gasto, Panel | Solo la secretaría o dirección del usuario. Admin y Super Admin ven todo |
 | Modificaciones presupuestales | Solo líneas de las unidades del usuario; quien tiene `modificaciones-autorizar` ve todas |
 | Recursos Materiales | Ve requisiciones de todas las secretarías |
 | Presupuesto (`/presupuesto`) | Solo roles Admin y Super Admin, además del permiso |
@@ -29,13 +29,13 @@ Los permisos de los **catálogos** no se escriben a mano: el comando los toma de
 
 | Módulo | Permisos |
 |---|---|
-| Presupuesto | `presupuesto-index`, `-edit`, `-import`, `-delete` |
-| Requisiciones | `requisiciones-index`, `-create`, `-edit`, `-delete`, `requisiciones-suficiencia` |
-| Órdenes de compra y proveedores | `ordenes-compra-create`, `proveedores-index`, `-create`, `-edit`, `-delete`, `-import` |
+| Presupuesto | `presupuesto-index`, `-create` (nueva partida), `-edit`, `-import`, `-delete`, `presupuesto-correr-saldos` (correr saldos a mano) |
+| Requisiciones | `requisiciones-index`, `-create`, `-edit`, `-delete`, `requisiciones-suficiencia`, `requisiciones-clc` (el área genera la CLC de una orden con factura), `requisiciones-extemporaneas` (Subdirección Administrativa: autoriza las capturadas fuera del periodo) |
+| Órdenes de compra y proveedores | `ordenes-compra-create`, `ordenes-compra-pagar` (registrar pago), `proveedores-index`, `-create`, `-edit`, `-delete`, `-import` |
 | Catálogos | `catalogos-{slug}-index`, `-create`, `-edit`, `-delete` (dar de baja / reactivar), `-import`; p. ej. `catalogos-vehiculos-edit`. Slugs en [Módulos](modulos.md#catálogos-generales) |
 | Bitácora de auditoría | `auditoria-index` |
 | Modificaciones presupuestales | `modificaciones-index`, `modificaciones-create`, `modificaciones-autorizar` |
-| Secretarías | `secretarias-index`, `-create`, `-edit`, `-delete` |
+| Secretarías y direcciones | `catalogos-unidades-administrativas-*` (los antiguos `secretarias-*` ya no se usan) |
 | Tickets de soporte | `tickets-index`, `tickets-create`, `tickets-update` |
 | Logs | `logs-view` |
 | Usuarios / Roles / Permisos | `users-*`, `roles-*`, `permisos-*` (`index`, `create`, `edit`, `delete`) |
@@ -46,9 +46,10 @@ Crear estos roles en **Administración → Roles**:
 
 | Rol | Permisos |
 |---|---|
-| Área solicitante | `requisiciones-index`, `requisiciones-create`, `requisiciones-edit`, `modificaciones-index`, `modificaciones-create` |
+| Área solicitante | `requisiciones-index`, `requisiciones-create`, `requisiciones-edit`, `requisiciones-clc`, `modificaciones-index`, `modificaciones-create` |
 | Recursos Materiales | `requisiciones-index`, `requisiciones-edit`, `requisiciones-suficiencia`, `ordenes-compra-create`, `proveedores-*` |
 | Jefe de Control Presupuestal | `modificaciones-index`, `modificaciones-autorizar` |
+| Subdirección Administrativa (Adquisiciones) | `requisiciones-index`, `requisiciones-extemporaneas` |
 | Control Vehicular | `catalogos-vehiculos-*` |
 | Consulta de catálogos | `catalogos-*-index` de los catálogos que deba ver |
 

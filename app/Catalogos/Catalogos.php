@@ -13,8 +13,8 @@ use App\Models\EjercicioFiscal;
 use App\Models\Firmante;
 use App\Models\Proveedor;
 use App\Models\ProveedorCuenta;
-use App\Models\Secretaria;
 use App\Models\TipoDocumento;
+use App\Models\User;
 use App\Models\Vehiculo;
 use Illuminate\Support\Facades\Schema;
 
@@ -70,21 +70,23 @@ final class Catalogos
             // Estructura orgánica
             new Catalogo(
                 slug: 'unidades-administrativas',
-                titulo: 'Direcciones (unidades administrativas)',
-                singular: 'dirección',
+                titulo: 'Secretarías y direcciones',
+                singular: 'secretaría o dirección',
                 grupo: 'Estructura orgánica',
-                descripcion: 'Centros gestores del presupuesto. La clave es la de la columna CLAVE del presupuesto importado.',
+                descripcion: 'Dependencias del Ayuntamiento y centros gestores del presupuesto (la clave es la columna CLAVE del presupuesto importado). Cada usuario pertenece a una y solo ve sus requisiciones y presupuesto.',
                 modelo: EgresoUnidadAdministrativa::class,
                 campos: [
                     Campo::texto('clave', 'Clave')->requerido()->max(20),
                     Campo::texto('nombre', 'Nombre')->requerido()->max(1500)->mayusculas(),
-                    Campo::relacion('secretaria_id', 'Secretaría', Secretaria::class, ['nombre']),
+                    Campo::texto('prefijo', 'Prefijo de folio')->max(10)->mayusculas()
+                        ->ayuda('Prefijo de los folios de sus requisiciones (p. ej. TES-0001). Vacío = REQ.'),
                     Campo::entero('año', 'Año')->requerido()->min(2000)->max(2100)->porDefecto(fn () => (int) date('Y')),
-                    Campo::texto('responsable', 'Responsable (titular)')->max(200),
-                    Campo::texto('cargo_responsable', 'Cargo del responsable')->max(200)->oculto(),
+                    Campo::texto('responsable', 'Titular')->max(200),
+                    Campo::texto('cargo_responsable', 'Cargo del titular')->max(200)->oculto(),
+                    Campo::calculado('usuarios', 'Usuarios', fn ($r) => (string) User::where('id_cat_egreso_unidad_administrativa', $r->getKey())->count()),
                     Campo::activo(),
                 ],
-                buscar: ['clave', 'nombre', 'responsable'],
+                buscar: ['clave', 'nombre', 'responsable', 'prefijo'],
                 llave: ['clave', 'año'],
                 valoresFijos: ['id_cat_area_x_nombre_y_puesto' => 1],
                 orden: ['año' => 'desc', 'clave' => 'asc'],
@@ -94,10 +96,10 @@ final class Catalogos
                 titulo: 'Departamentos',
                 singular: 'departamento',
                 grupo: 'Estructura orgánica',
-                descripcion: 'Áreas dentro de cada dirección.',
+                descripcion: 'Áreas dentro de cada secretaría o dirección.',
                 modelo: Departamento::class,
                 campos: [
-                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave')->requerido(),
+                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Secretaría o dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave')->requerido(),
                     Campo::texto('clave', 'Clave')->max(20),
                     Campo::texto('nombre', 'Nombre')->requerido()->max(300)->mayusculas(),
                     Campo::texto('responsable', 'Responsable')->max(200),
@@ -111,13 +113,13 @@ final class Catalogos
                 titulo: 'Responsables y firmantes',
                 singular: 'firmante',
                 grupo: 'Estructura orgánica',
-                descripcion: 'Quién firma cada documento impreso. Si se indica dirección, tiene prioridad sobre el firmante general para esa dirección.',
+                descripcion: 'Quién firma cada documento impreso. Si se indica secretaría o dirección, tiene prioridad sobre el firmante general.',
                 modelo: Firmante::class,
                 campos: [
                     Campo::relacion('tipo_documento_id', 'Documento', TipoDocumento::class, ['nombre'], 'clave')->requerido(),
                     Campo::seleccion('rol', 'Firma como', Firmante::ROLES)->requerido(),
-                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave')
-                        ->ayuda('Vacío = aplica a todas las direcciones.'),
+                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Secretaría o dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave')
+                        ->ayuda('Vacío = aplica a todas las secretarías y direcciones.'),
                     Campo::texto('nombre', 'Nombre')->requerido()->max(200),
                     Campo::texto('cargo', 'Cargo')->requerido()->max(200),
                     Campo::fecha('vigente_desde', 'Vigente desde')->requerido()->porDefecto(fn () => now()->toDateString()),
@@ -200,17 +202,27 @@ final class Catalogos
                 titulo: 'Ejercicios fiscales',
                 singular: 'ejercicio fiscal',
                 grupo: 'Ejercicios y documentos',
-                descripcion: 'Un ejercicio cerrado ya no admite requisiciones nuevas.',
+                descripcion: 'Un ejercicio cerrado ya no admite requisiciones nuevas. El periodo de captura (días de cada mes) define qué requisiciones son extemporáneas.',
                 modelo: EjercicioFiscal::class,
                 campos: [
                     Campo::entero('año', 'Año')->requerido()->min(2000)->max(2100)->unico()->porDefecto(fn () => (int) date('Y')),
                     Campo::texto('descripcion', 'Descripción')->max(200),
                     Campo::seleccion('estado', 'Estado', ['abierto' => 'Abierto', 'cerrado' => 'Cerrado'])->requerido()->porDefecto('abierto'),
+                    Campo::entero('captura_dia_inicio', 'Captura de requisiciones: del día')->requerido()->min(1)->max(31)->porDefecto(EjercicioFiscal::CAPTURA_DIA_INICIO),
+                    Campo::entero('captura_dia_fin', 'Captura de requisiciones: al día')->requerido()->min(1)->max(31)->porDefecto(EjercicioFiscal::CAPTURA_DIA_FIN)
+                        ->ayuda('Fuera de estos días, la requisición queda extemporánea y necesita autorización de la Subdirección Administrativa.'),
                     Campo::activo(),
                 ],
                 buscar: ['año', 'descripcion'],
                 llave: ['año'],
                 orden: ['año' => 'desc'],
+                validar: function (array $datos) {
+                    if (isset($datos['captura_dia_inicio'], $datos['captura_dia_fin']) && (int) $datos['captura_dia_inicio'] > (int) $datos['captura_dia_fin']) {
+                        return ['captura_dia_fin' => 'El último día de captura no puede ser anterior al primero.'];
+                    }
+
+                    return [];
+                },
             ),
             new Catalogo(
                 slug: 'tipos-documento',
@@ -243,10 +255,28 @@ final class Catalogos
                     Campo::texto('correo', 'Correo')->max(150)->reglas(['email']),
                     Campo::texto('telefono', 'Teléfono')->max(30),
                     Campo::texto('domicilio', 'Domicilio')->max(500)->oculto(),
+                    Campo::relacion('id_cat_banco', 'Banco', Banco::class, ['clave', 'descripcion'], 'clave')
+                        ->ayuda('Si se deja vacío, se toma de los 3 primeros dígitos de la CLABE.'),
+                    Campo::texto('clabe', 'CLABE')->max(18)->unico()->regex('/^\d{18}$/', 'La CLABE debe tener 18 dígitos.'),
+                    Campo::texto('cuenta_bancaria', 'Número de cuenta')->max(20)->regex('/^\d+$/', 'El número de cuenta solo lleva dígitos.'),
                     Campo::activo(),
                 ],
-                buscar: ['nombre', 'rfc'],
+                buscar: ['nombre', 'rfc', 'clabe', 'cuenta_bancaria'],
                 llave: ['rfc'],
+                preparar: function (array $datos) {
+                    if (empty($datos['id_cat_banco']) && ! empty($datos['clabe']) && Schema::hasTable('cat_banco')) {
+                        $datos['id_cat_banco'] = Banco::where('clave', substr($datos['clabe'], 0, 3))->value('id_cat_banco');
+                    }
+
+                    return $datos;
+                },
+                validar: function (array $datos) {
+                    if (! empty($datos['clabe']) && ! ProveedorCuenta::clabeValida($datos['clabe'])) {
+                        return ['clabe' => 'La CLABE no es válida (el dígito verificador no coincide).'];
+                    }
+
+                    return [];
+                },
             ),
             new Catalogo(
                 slug: 'cuentas-bancarias',
@@ -332,7 +362,7 @@ final class Catalogos
                     Campo::entero('modelo', 'Modelo (año)')->min(1950)->max(2100),
                     Campo::texto('color', 'Color')->max(40)->mayusculas()->oculto(),
                     Campo::texto('tipo', 'Tipo')->max(40)->mayusculas()->oculto(),
-                    Campo::relacion('secretaria_id', 'Secretaría asignada', Secretaria::class, ['nombre']),
+                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Secretaría o dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave'),
                     Campo::texto('resguardante', 'Resguardante')->max(200)->mayusculas(),
                     Campo::texto('cargo_resguardante', 'Cargo del resguardante')->max(200)->oculto(),
                     Campo::texto('numero_resguardo', 'Número de resguardo')->max(40)->oculto(),

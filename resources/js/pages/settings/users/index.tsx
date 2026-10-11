@@ -23,7 +23,7 @@ type User = {
     name: string;
     email: string;
     email_verified_at: string | null;
-    secretaria: string | null;
+    unidad: string | null;
     roles: string[];
     created_at: string;
 };
@@ -74,7 +74,7 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                 <TableRow>
                                     <TableHead>Name</TableHead>
                                     <TableHead>Email</TableHead>
-                                    <TableHead>Secretaría</TableHead>
+                                    <TableHead>Secretaría o dirección</TableHead>
                                     <TableHead>Verified</TableHead>
                                     <TableHead>Roles</TableHead>
                                     <TableHead>Created</TableHead>
@@ -99,7 +99,7 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                         </TableCell>
                                         <TableCell>{user.email}</TableCell>
                                         <TableCell>
-                                            {user.secretaria || <span className="text-muted-foreground italic">—</span>}
+                                            {user.unidad || <span className="text-muted-foreground italic">—</span>}
                                         </TableCell>
                                         <TableCell>
                                             {user.email_verified_at ? (

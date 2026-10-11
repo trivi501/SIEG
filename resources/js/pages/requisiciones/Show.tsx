@@ -14,7 +14,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { fechaLocal, money } from '@/lib/presupuesto';
+import { fechaLocal, money, numero } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -175,6 +175,9 @@ export default function Show({
     const esAprobado = estado === 3;
     const esRecursosMateriales = estado === 5;
     const esCotizacion = estado === 6;
+    const esComprometida = estado === 7;
+    const extemporaneaPendiente =
+        !!requisicion.extemporanea && !requisicion.extemporanea_autorizada_at;
     const [showEnviar, setShowEnviar] = useState(false);
     const [showResultado, setShowResultado] = useState(false);
     const [showOrden, setShowOrden] = useState(false);
@@ -185,7 +188,14 @@ export default function Show({
         fecha: new Date().toISOString().slice(0, 10),
         observaciones: '',
     });
+    const [nuevoProveedor, setNuevoProveedor] = useState(false);
+    const proveedorForm = useForm({ nombre: '', rfc: '', activo: true });
     const xmlForm = useForm<{ xml: File | null }>({ xml: null });
+    const pagoForm = useForm({
+        pago_fecha: new Date().toISOString().slice(0, 10),
+        pago_forma: 'transferencia',
+        pago_referencia: '',
+    });
 
     const post = (accion: string, options = {}) =>
         router.post(
@@ -217,6 +227,37 @@ export default function Show({
         });
     };
 
+    // Alta rápida del proveedor desde la orden de compra (mismo catálogo /catalogos/proveedores):
+    // al guardarse queda asignado a la orden.
+    const guardarProveedor = () => {
+        const { nombre, rfc } = proveedorForm.data;
+
+        proveedorForm.post('/catalogos/proveedores', {
+            preserveScroll: true,
+            preserveState: true,
+            onSuccess: (p: any) => {
+                const lista = (p.props.proveedores ?? []) as {
+                    id: number;
+                    nombre: string;
+                    rfc: string | null;
+                }[];
+                const rfcBuscado = rfc.trim().toUpperCase();
+                const nuevo = rfcBuscado
+                    ? lista.find((x) => x.rfc === rfcBuscado)
+                    : lista
+                          .filter((x) => x.nombre === nombre.trim())
+                          .sort((a, b) => b.id - a.id)[0];
+
+                if (nuevo) {
+                    ordenForm.setData('proveedor_id', String(nuevo.id));
+                }
+
+                proveedorForm.reset();
+                setNuevoProveedor(false);
+            },
+        });
+    };
+
     const cargarXml = (e: React.FormEvent) => {
         e.preventDefault();
         // orden?.id: el React Compiler memoiza dependencias fuera del handler, aun cuando no hay orden.
@@ -227,7 +268,31 @@ export default function Show({
         });
     };
 
-    const precios = esRecursosMateriales || esCotizacion;
+    const generarClc = () => {
+        if (
+            !confirm(
+                `¿Generar la CLC de la orden ${orden?.folio_completo} por ${money(orden?.importe ?? 0)}?`,
+            )
+        ) {
+            return;
+        }
+
+        router.post(
+            `/ordenes-compra/${orden?.id}/clc`,
+            {},
+            { preserveScroll: true },
+        );
+    };
+
+    const registrarPago = (e: React.FormEvent) => {
+        e.preventDefault();
+        pagoForm.post(`/ordenes-compra/${orden?.id}/pago`, {
+            preserveScroll: true,
+        });
+    };
+
+    // De Recursos Materiales en adelante (cotización, comprometida, orden de compra, factura, CLC, pagada).
+    const precios = estado >= 5;
 
     return (
         <>
@@ -246,6 +311,46 @@ export default function Show({
                 </div>
 
                 <div className="grid max-w-5xl gap-6">
+                    {!!requisicion.extemporanea && (
+                        <div
+                            className={`flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm ${extemporaneaPendiente ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}
+                        >
+                            {extemporaneaPendiente ? (
+                                <span>
+                                    <strong>Requisición extemporánea:</strong>{' '}
+                                    se capturó fuera del periodo de captura. No
+                                    se puede enviar a revisión hasta que la
+                                    autorice la Subdirección Administrativa
+                                    (Adquisiciones).
+                                </span>
+                            ) : (
+                                <span>
+                                    <strong>Extemporánea autorizada</strong> por{' '}
+                                    {requisicion.extemporanea_autorizador
+                                        ?.name ?? '—'}{' '}
+                                    el{' '}
+                                    {fechaLocal(
+                                        requisicion.extemporanea_autorizada_at,
+                                    )}
+                                    .
+                                </span>
+                            )}
+                            {extemporaneaPendiente &&
+                                puede('requisiciones-extemporaneas') && (
+                                    <Button
+                                        size="sm"
+                                        onClick={() =>
+                                            confirm(
+                                                `¿Autorizar la requisición extemporánea ${requisicion.folio_completo}?`,
+                                            ) && post('autorizar-extemporanea')
+                                        }
+                                    >
+                                        <CheckCircle2 className="mr-1 h-4 w-4" />
+                                        Autorizar extemporánea
+                                    </Button>
+                                )}
+                        </div>
+                    )}
                     <Card>
                         <CardHeader>
                             <CardTitle>Datos Generales</CardTitle>
@@ -408,9 +513,7 @@ export default function Show({
                                                             )}
                                                         </td>
                                                         <td className="p-2 text-center">
-                                                            {parseFloat(
-                                                                d.cantidad,
-                                                            ).toFixed(2)}
+                                                            {numero(d.cantidad)}
                                                         </td>
                                                         {precios && (
                                                             <td className="p-2 text-center text-xs">
@@ -508,11 +611,47 @@ export default function Show({
                                                 className="bg-green-100 text-green-800"
                                                 variant="secondary"
                                             >
-                                                Cargada
+                                                Aceptada
                                             </Badge>
                                         ) : (
                                             <Badge variant="secondary">
                                                 Pendiente
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <span className="font-semibold">
+                                            Pago:
+                                        </span>{' '}
+                                        {orden.pago_fecha ? (
+                                            <Badge
+                                                className="bg-green-100 text-green-800"
+                                                variant="secondary"
+                                            >
+                                                Pagada
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="secondary">
+                                                Pendiente
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <span className="font-semibold">
+                                            CLC:
+                                        </span>{' '}
+                                        {orden.clc_folio_completo ? (
+                                            <>
+                                                {orden.clc_folio_completo}{' '}
+                                                <span className="text-muted-foreground">
+                                                    ({orden.clc_fecha})
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <Badge variant="secondary">
+                                                {orden.xml_uuid
+                                                    ? 'Por generar'
+                                                    : 'Al cargar la factura'}
                                             </Badge>
                                         )}
                                     </div>
@@ -540,6 +679,32 @@ export default function Show({
                                             </a>
                                         </Button>
                                     )}
+                                    {orden.clc_folio_completo && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            asChild
+                                        >
+                                            <a
+                                                href={`/ordenes-compra/${orden.id}/clc`}
+                                                target="_blank"
+                                            >
+                                                <FileText className="mr-1 h-4 w-4" />{' '}
+                                                Imprimir CLC
+                                            </a>
+                                        </Button>
+                                    )}
+                                    {orden.xml_uuid &&
+                                        !orden.clc_folio_completo &&
+                                        puede('requisiciones-clc') && (
+                                            <Button
+                                                size="sm"
+                                                onClick={generarClc}
+                                            >
+                                                <FileText className="mr-1 h-4 w-4" />{' '}
+                                                Generar CLC
+                                            </Button>
+                                        )}
                                 </div>
 
                                 {orden.xml_uuid ? (
@@ -574,7 +739,139 @@ export default function Show({
                                             {money(orden.xml_total)}
                                         </div>
                                     </div>
-                                ) : (
+                                ) : null}
+
+                                {orden.xml_uuid && orden.pago_fecha && (
+                                    <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
+                                        <div>
+                                            <span className="font-semibold">
+                                                Fecha de pago:
+                                            </span>{' '}
+                                            {orden.pago_fecha}
+                                        </div>
+                                        <div>
+                                            <span className="font-semibold">
+                                                Forma y referencia:
+                                            </span>{' '}
+                                            {orden.pago_forma === 'cheque'
+                                                ? 'Cheque'
+                                                : 'Transferencia'}{' '}
+                                            {orden.pago_referencia}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {orden.xml_uuid &&
+                                    !orden.clc_folio_completo &&
+                                    !orden.pago_fecha && (
+                                        <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                            Factura aceptada: el área genera la
+                                            CLC para solicitar el pago.
+                                        </p>
+                                    )}
+
+                                {orden.clc_folio_completo &&
+                                    !orden.pago_fecha &&
+                                    puede('ordenes-compra-pagar') && (
+                                        <form
+                                            onSubmit={registrarPago}
+                                            className="space-y-2 rounded-md border p-3"
+                                        >
+                                            <p className="font-semibold">
+                                                Registrar pago
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                Pago de {money(orden.importe)} a{' '}
+                                                {orden.proveedor?.nombre}. Pasa
+                                                el importe a "pagado" en el
+                                                presupuesto.
+                                            </p>
+                                            <div className="flex flex-wrap items-end gap-2">
+                                                <label className="grid gap-1 text-xs">
+                                                    Fecha
+                                                    <input
+                                                        type="date"
+                                                        value={
+                                                            pagoForm.data
+                                                                .pago_fecha
+                                                        }
+                                                        onChange={(e) =>
+                                                            pagoForm.setData(
+                                                                'pago_fecha',
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        className="rounded-md border border-input px-2 py-1 text-sm"
+                                                    />
+                                                </label>
+                                                <label className="grid gap-1 text-xs">
+                                                    Forma de pago
+                                                    <select
+                                                        value={
+                                                            pagoForm.data
+                                                                .pago_forma
+                                                        }
+                                                        onChange={(e) =>
+                                                            pagoForm.setData(
+                                                                'pago_forma',
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        className="rounded-md border border-input bg-transparent px-2 py-1 text-sm"
+                                                    >
+                                                        <option value="transferencia">
+                                                            Transferencia
+                                                        </option>
+                                                        <option value="cheque">
+                                                            Cheque
+                                                        </option>
+                                                    </select>
+                                                </label>
+                                                <label className="grid gap-1 text-xs">
+                                                    Referencia (folio de
+                                                    transferencia o número de
+                                                    cheque)
+                                                    <input
+                                                        value={
+                                                            pagoForm.data
+                                                                .pago_referencia
+                                                        }
+                                                        onChange={(e) =>
+                                                            pagoForm.setData(
+                                                                'pago_referencia',
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        maxLength={100}
+                                                        className="w-64 rounded-md border border-input px-2 py-1 text-sm"
+                                                    />
+                                                </label>
+                                                <Button
+                                                    type="submit"
+                                                    size="sm"
+                                                    disabled={
+                                                        !pagoForm.data
+                                                            .pago_referencia ||
+                                                        pagoForm.processing
+                                                    }
+                                                >
+                                                    Registrar pago
+                                                </Button>
+                                            </div>
+                                            {Object.values(pagoForm.errors).map(
+                                                (error) => (
+                                                    <p
+                                                        key={error}
+                                                        className="text-sm text-destructive"
+                                                    >
+                                                        {error}
+                                                    </p>
+                                                ),
+                                            )}
+                                        </form>
+                                    )}
+
+                                {!orden.xml_uuid &&
                                     puede('ordenes-compra-create') && (
                                         <form
                                             onSubmit={cargarXml}
@@ -623,8 +920,7 @@ export default function Show({
                                                 </p>
                                             )}
                                         </form>
-                                    )
-                                )}
+                                    )}
                             </CardContent>
                         </Card>
                     )}
@@ -715,7 +1011,15 @@ export default function Show({
                                         Editar
                                     </Link>
                                 </Button>
-                                <Button onClick={() => setShowEnviar(true)}>
+                                <Button
+                                    onClick={() => setShowEnviar(true)}
+                                    disabled={extemporaneaPendiente}
+                                    title={
+                                        extemporaneaPendiente
+                                            ? 'Extemporánea: falta la autorización de la Subdirección Administrativa'
+                                            : ''
+                                    }
+                                >
                                     <Send className="mr-2 h-4 w-4" /> Enviar a
                                     Revisión
                                 </Button>
@@ -728,15 +1032,25 @@ export default function Show({
                                 </Button>
                                 <Button
                                     variant="destructive"
-                                    onClick={() => post('rechazar')}
+                                    onClick={() => {
+                                        const motivo = window.prompt(
+                                            'Motivo del rechazo (obligatorio):',
+                                        );
+
+                                        if (motivo?.trim()) {
+                                            router.post(
+                                                `/requisiciones/${id}/rechazar`,
+                                                { motivo },
+                                                { preserveScroll: true },
+                                            );
+                                        }
+                                    }}
                                 >
                                     No válida
                                 </Button>
                             </>
                         )}
-                        {(esAprobado ||
-                            esRecursosMateriales ||
-                            esCotizacion) && (
+                        {(esAprobado || estado >= 5) && (
                             <Button variant="outline" asChild>
                                 <a
                                     href={`/requisiciones/${id}/pdf`}
@@ -796,11 +1110,11 @@ export default function Show({
                                     </Link>
                                 </Button>
                             )}
-                        {requisicion.suficiencia === true &&
+                        {esComprometida &&
                             !orden &&
                             puede('ordenes-compra-create') && (
                                 <Button onClick={() => setShowOrden(true)}>
-                                    Generar orden de compra
+                                    Asignar proveedor y generar orden de compra
                                 </Button>
                             )}
                     </div>
@@ -889,7 +1203,9 @@ export default function Show({
                 <DialogContent>
                     <form onSubmit={generarOrden} className="space-y-4">
                         <DialogHeader>
-                            <DialogTitle>Generar orden de compra</DialogTitle>
+                            <DialogTitle>
+                                Asignar proveedor y generar orden de compra
+                            </DialogTitle>
                             <DialogDescription>
                                 Requisición {requisicion.folio_completo} por{' '}
                                 {money(requisicion.total)}.
@@ -916,13 +1232,7 @@ export default function Show({
                             />
                             {proveedores.length === 0 && (
                                 <p className="text-xs text-muted-foreground">
-                                    No hay proveedores activos.{' '}
-                                    <Link
-                                        href="/catalogos/proveedores"
-                                        className="text-primary hover:underline"
-                                    >
-                                        Dar de alta proveedores
-                                    </Link>
+                                    No hay proveedores activos.
                                 </p>
                             )}
                             {ordenForm.errors.proveedor_id && (
@@ -930,7 +1240,83 @@ export default function Show({
                                     {ordenForm.errors.proveedor_id}
                                 </p>
                             )}
+                            {puede('proveedores-create') && !nuevoProveedor && (
+                                <button
+                                    type="button"
+                                    onClick={() => setNuevoProveedor(true)}
+                                    className="text-xs text-primary hover:underline"
+                                >
+                                    + El proveedor no está en la lista: darlo de
+                                    alta
+                                </button>
+                            )}
                         </div>
+                        {nuevoProveedor && (
+                            <div className="space-y-2 rounded-md border p-3">
+                                <p className="text-sm font-medium">
+                                    Nuevo proveedor
+                                </p>
+                                <input
+                                    value={proveedorForm.data.nombre}
+                                    onChange={(e) =>
+                                        proveedorForm.setData(
+                                            'nombre',
+                                            e.target.value,
+                                        )
+                                    }
+                                    placeholder="Nombre o razón social"
+                                    maxLength={300}
+                                    className="block w-full rounded-md border border-input px-2 py-1 text-sm"
+                                />
+                                <input
+                                    value={proveedorForm.data.rfc}
+                                    onChange={(e) =>
+                                        proveedorForm.setData(
+                                            'rfc',
+                                            e.target.value.toUpperCase(),
+                                        )
+                                    }
+                                    placeholder="RFC (se valida contra la factura)"
+                                    maxLength={13}
+                                    className="block w-full rounded-md border border-input px-2 py-1 font-mono text-sm"
+                                />
+                                {Object.values(proveedorForm.errors).map(
+                                    (error) => (
+                                        <p
+                                            key={error}
+                                            className="text-xs text-destructive"
+                                        >
+                                            {error}
+                                        </p>
+                                    ),
+                                )}
+                                <div className="flex gap-2">
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={guardarProveedor}
+                                        disabled={
+                                            !proveedorForm.data.nombre.trim() ||
+                                            proveedorForm.processing
+                                        }
+                                    >
+                                        Guardar y asignar
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                            proveedorForm.reset();
+                                            proveedorForm.clearErrors();
+                                            setNuevoProveedor(false);
+                                        }}
+                                    >
+                                        Cancelar
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                         <div className="space-y-1">
                             <label className="text-sm font-medium">Fecha</label>
                             <input

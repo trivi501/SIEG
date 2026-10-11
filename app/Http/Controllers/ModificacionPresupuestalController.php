@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EgresoRequisicion;
 use App\Models\ModificacionPresupuestal;
 use App\Services\PresupuestoService;
+use App\Services\SaldosMensuales;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -54,6 +55,7 @@ class ModificacionPresupuestalController extends Controller
             'modificaciones' => $query->orderByDesc('id')->paginate(20)->withQueryString(),
             'filters' => $request->only(['tipo', 'estado', 'folio', 'partida']),
             'tipos' => ModificacionPresupuestal::TIPOS,
+            'meses' => SaldosMensuales::MESES,
         ]);
     }
 
@@ -71,8 +73,15 @@ class ModificacionPresupuestalController extends Controller
             $faltanteSugerido = $faltante['faltante'] ?? null;
         }
 
+        $lineas = $this->presupuesto->lineas($claves);
+        $mesActual = $this->mesActual();
+
         return Inertia::render('modificaciones-presupuestales/Create', [
-            'lineas' => $this->presupuesto->lineas($claves),
+            'lineas' => $lineas,
+            // Periodos que se pueden elegir (del mes actual a diciembre) y el disponible de cada línea en cada uno.
+            'meses' => array_slice(SaldosMensuales::MESES, $mesActual - 1, null, true),
+            'mesActual' => $mesActual,
+            'disponiblesMes' => (new SaldosMensuales)->disponiblesPorMes((int) date('Y'), $lineas->pluck('clave')->all(), $mesActual),
             'tipos' => ModificacionPresupuestal::TIPOS,
             'requisicion' => $requisicion?->only(['id_tb_egreso_requisicion', 'folio_completo']),
             'destinoSugerido' => $destinoSugerido,
@@ -86,13 +95,19 @@ class ModificacionPresupuestalController extends Controller
             'tipo' => ['required', Rule::in(array_keys(ModificacionPresupuestal::TIPOS))],
             'origen' => 'nullable|required_if:tipo,traspaso,reduccion|string|max:400',
             'destino' => 'nullable|required_if:tipo,traspaso,ampliacion|string|max:400|different:origen',
+            'origen_mes' => 'nullable|required_if:tipo,traspaso,reduccion|integer|between:'.$this->mesActual().',12',
+            'destino_mes' => 'nullable|required_if:tipo,traspaso,ampliacion|integer|between:'.$this->mesActual().',12',
             'importe' => 'required|numeric|min:0.01|max:9999999999',
             'justificacion' => 'required|string|max:5000',
             'id_tb_egreso_requisicion' => 'nullable|integer|exists:tb_egreso_requisicion,id_tb_egreso_requisicion',
         ], [
-            'origen.required_if' => 'Selecciona la línea de la que sale el recurso.',
-            'destino.required_if' => 'Selecciona la línea que recibe el recurso.',
-            'destino.different' => 'El origen y el destino deben ser líneas distintas.',
+            'origen.required_if' => 'Selecciona la línea emisora (de la que sale el recurso).',
+            'destino.required_if' => 'Selecciona la línea receptora (la que recibe el recurso).',
+            'destino.different' => 'El emisor y el receptor deben ser líneas distintas.',
+            'origen_mes.required_if' => 'Selecciona el periodo (mes) del que sale el recurso.',
+            'destino_mes.required_if' => 'Selecciona el periodo (mes) al que entra el recurso.',
+            'origen_mes.between' => 'El periodo del emisor debe ser del mes actual a diciembre.',
+            'destino_mes.between' => 'El periodo del receptor debe ser del mes actual a diciembre.',
         ]);
 
         $tipo = $validated['tipo'];
@@ -107,6 +122,9 @@ class ModificacionPresupuestalController extends Controller
         if ($origen && $importe > $origen['disponible']) {
             throw ValidationException::withMessages(['importe' => 'El importe excede el disponible de la línea de origen ($'.number_format($origen['disponible'], 2).').']);
         }
+        if ($origen) {
+            $this->validarDisponibleMes($origen['clave'], (int) $validated['origen_mes'], $importe, (int) date('Y'), 'importe');
+        }
 
         $modificacion = DB::transaction(function () use ($validated, $tipo, $origen, $destino, $importe) {
             $año = (int) date('Y');
@@ -119,7 +137,9 @@ class ModificacionPresupuestalController extends Controller
                 'tipo' => $tipo,
                 'estado' => 'pendiente',
                 ...$this->camposLinea('origen', $origen),
+                'origen_mes' => $origen ? (int) $validated['origen_mes'] : null,
                 ...$this->camposLinea('destino', $destino),
+                'destino_mes' => $destino ? (int) $validated['destino_mes'] : null,
                 'importe' => $importe,
                 'justificacion' => $validated['justificacion'],
                 'id_tb_egreso_requisicion' => $validated['id_tb_egreso_requisicion'] ?? null,
@@ -138,6 +158,7 @@ class ModificacionPresupuestalController extends Controller
         return Inertia::render('modificaciones-presupuestales/Show', [
             'modificacion' => $modificacion,
             'tipos' => ModificacionPresupuestal::TIPOS,
+            'meses' => SaldosMensuales::MESES,
             'origen' => ($c = $modificacion->claveLinea('origen')) ? $this->presupuesto->linea($c) : null,
             'destino' => ($c = $modificacion->claveLinea('destino')) ? $this->presupuesto->linea($c) : null,
         ]);
@@ -176,6 +197,9 @@ class ModificacionPresupuestalController extends Controller
             if ($origen && $mod->importe > $origen['disponible']) {
                 throw ValidationException::withMessages(['observaciones' => 'El disponible actual de la línea de origen ($'.number_format($origen['disponible'], 2).') ya no cubre el importe.']);
             }
+            if ($origen && $mod->origen_mes) {
+                $this->validarDisponibleMes($origen['clave'], $mod->origen_mes, $mod->importe, (int) $mod->año, 'observaciones');
+            }
 
             $mod->update([
                 'estado' => 'autorizada',
@@ -208,6 +232,21 @@ class ModificacionPresupuestalController extends Controller
         ]);
 
         return back()->with('success', 'Modificación rechazada.');
+    }
+
+    private function mesActual(): int
+    {
+        return (int) now(SaldosMensuales::ZONA)->month;
+    }
+
+    /** El emisor no puede ceder más de lo que tiene disponible en el periodo elegido. */
+    private function validarDisponibleMes(string $clave, int $mes, float $importe, int $año, string $campo): void
+    {
+        $disponible = (new SaldosMensuales)->disponiblesPorMes($año, [$clave], $mes)[$clave][$mes] ?? 0.0;
+
+        if (round($importe, 2) > $disponible) {
+            throw ValidationException::withMessages([$campo => 'El importe excede el disponible de '.SaldosMensuales::MESES[$mes].' de la línea emisora ($'.number_format($disponible, 2).').']);
+        }
     }
 
     private function lineaPermitida(string $clave, ?array $clavesUnidad, string $campo): array

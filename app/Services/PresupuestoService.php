@@ -8,14 +8,20 @@ use App\Models\ModificacionPresupuestal;
 use App\Models\PresupuestoEgreso;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Saldos del presupuesto de egresos por línea (unidad|fuente|proyecto|partida):
  *
  *   vigente      = asignado (IMPORTE_TOTAL importado) ± modificaciones presupuestales autorizadas
- *   comprometido = requisiciones validadas con suficiencia
  *   en trámite   = requisiciones no rechazadas que aún no tienen suficiencia
- *   disponible   = vigente - comprometido
+ *   comprometido = requisiciones con suficiencia cuya orden de compra aún no tiene factura
+ *   devengado    = requisiciones cuya orden de compra ya tiene factura XML y aún no se paga
+ *   pagado       = requisiciones cuya orden de compra ya tiene pago registrado
+ *   disponible   = vigente - comprometido - devengado - pagado
+ *
+ * Cada importe está en un solo momento: al cargar la factura pasa de comprometido a devengado y al
+ * registrar el pago, de devengado a pagado.
  */
 class PresupuestoService
 {
@@ -34,11 +40,11 @@ class PresupuestoService
             return null;
         }
 
-        if (! $user->secretaria_id) {
-            return [];
-        }
+        $clave = $user->id_cat_egreso_unidad_administrativa
+            ? EgresoUnidadAdministrativa::whereKey($user->id_cat_egreso_unidad_administrativa)->value('clave')
+            : null;
 
-        return EgresoUnidadAdministrativa::where('secretaria_id', $user->secretaria_id)->pluck('clave')->all();
+        return $clave === null ? [] : [trim((string) $clave)];
     }
 
     /**
@@ -53,14 +59,16 @@ class PresupuestoService
             ->get(['id_presupuesto', 'CLAVE', 'UNIDAD_ADMINISTRATIVA', 'CLAVE3', 'FUENTE_DE_FINANCIAMIENTO', 'CLAVE6', 'PROYECTO', 'PARTIDA', 'NOMBRE_PARTIDA', 'IMPORTE_TOTAL']);
 
         $modificado = $this->modificadoPorClave();
-        [$comprometido, $enTramite] = $this->ejercidoPorClave($excluirRequisicion);
+        [$comprometido, $enTramite, $devengado, $pagado] = $this->ejercidoPorClave($excluirRequisicion);
 
-        return $presupuesto->map(function ($p) use ($modificado, $comprometido, $enTramite) {
+        return $presupuesto->map(function ($p) use ($modificado, $comprometido, $enTramite, $devengado, $pagado) {
             $clave = self::clave($p->CLAVE, $p->CLAVE3, $p->CLAVE6, $p->PARTIDA);
             $asignado = (float) $p->IMPORTE_TOTAL;
             $mod = $modificado[$clave] ?? 0.0;
             $vigente = $asignado + $mod;
             $comp = $comprometido[$clave] ?? 0.0;
+            $dev = $devengado[$clave] ?? 0.0;
+            $pag = $pagado[$clave] ?? 0.0;
 
             return [
                 'clave' => $clave,
@@ -77,7 +85,9 @@ class PresupuestoService
                 'vigente' => round($vigente, 2),
                 'comprometido' => round($comp, 2),
                 'en_tramite' => round($enTramite[$clave] ?? 0.0, 2),
-                'disponible' => round($vigente - $comp, 2),
+                'devengado' => round($dev, 2),
+                'pagado' => round($pag, 2),
+                'disponible' => round($vigente - $comp - $dev - $pag, 2),
             ];
         })->values();
     }
@@ -114,6 +124,8 @@ class PresupuestoService
             [, $fuente, $proyecto, $partida] = explode('|', $clave);
             $ok = $linea !== null && round($monto, 2) <= $linea['disponible'];
             $suficiente = $suficiente && $ok;
+            // Ya con suficiencia, su propio importe se muestra comprometido y descontado del disponible.
+            $propio = $requisicion->suficiencia === true ? $monto : 0.0;
 
             $partidas[] = [
                 'clave' => $clave,
@@ -124,8 +136,9 @@ class PresupuestoService
                 'existe' => $linea !== null,
                 'requerido' => round($monto, 2),
                 'vigente' => $linea['vigente'] ?? 0,
-                'comprometido' => $linea['comprometido'] ?? 0,
-                'disponible' => $linea['disponible'] ?? 0,
+                // Todo lo ya ejercido de la línea (comprometido + devengado + pagado).
+                'comprometido' => round(($linea['comprometido'] ?? 0) + ($linea['devengado'] ?? 0) + ($linea['pagado'] ?? 0) + $propio, 2),
+                'disponible' => round(($linea['disponible'] ?? 0) - $propio, 2),
                 'faltante' => $ok ? 0 : round($monto - ($linea['disponible'] ?? 0), 2),
                 'suficiente' => $ok,
             ];
@@ -154,29 +167,46 @@ class PresupuestoService
         return $neto;
     }
 
-    /** @return array{0: array<string, float>, 1: array<string, float>} [comprometido, en trámite] */
+    /**
+     * Momentos del gasto por clave de línea, con los importes de los conceptos de cada requisición:
+     * en trámite (sin suficiencia), comprometido (con suficiencia, sin factura), devengado (su orden
+     * de compra ya tiene factura XML, sin pago) y pagado (su orden de compra ya tiene pago registrado).
+     *
+     * @return array{0: array<string, float>, 1: array<string, float>, 2: array<string, float>, 3: array<string, float>}
+     */
     private function ejercidoPorClave(?int $excluirRequisicion): array
     {
+        $conPago = Schema::hasColumn('ordenes_compra', 'pago_fecha');
+
         $filas = DB::table('tb_egreso_requisicion_detalle as d')
             ->join('tb_egreso_requisicion as r', 'r.id_tb_egreso_requisicion', '=', 'd.id_tb_egreso_requisicion')
             ->join('cat_egreso_unidad_administrativa as u', 'u.id_cat_egreso_unidad_administrativa', '=', 'r.id_cat_egreso_unidad_administrativa')
+            ->leftJoin('ordenes_compra as oc', 'oc.id_tb_egreso_requisicion', '=', 'r.id_tb_egreso_requisicion')
             ->where('r.id_cat_egreso_requisicion_estado', '!=', 4) // rechazada no compromete presupuesto
             ->when($excluirRequisicion, fn ($q) => $q->where('r.id_tb_egreso_requisicion', '!=', $excluirRequisicion))
-            ->selectRaw('u.clave, d.fuente, d.proyecto, d.partida, r.suficiencia, SUM(COALESCE(d.total, d.sub_total, 0)) as monto')
-            ->groupBy('u.clave', 'd.fuente', 'd.proyecto', 'd.partida', 'r.suficiencia')
+            ->selectRaw('u.clave, d.fuente, d.proyecto, d.partida, r.suficiencia,
+                CASE WHEN oc.xml_uuid IS NOT NULL THEN 1 ELSE 0 END as devengado,
+                '.($conPago ? 'CASE WHEN oc.pago_fecha IS NOT NULL THEN 1 ELSE 0 END' : '0').' as pagado,
+                SUM(COALESCE(d.total, d.sub_total, 0)) as monto')
+            ->groupBy('u.clave', 'd.fuente', 'd.proyecto', 'd.partida', 'r.suficiencia', 'devengado', 'pagado')
             ->get();
 
-        $comprometido = [];
-        $enTramite = [];
+        $comprometido = $enTramite = $devengado = $pagado = [];
         foreach ($filas as $f) {
             $clave = self::clave($f->clave, $f->fuente, $f->proyecto, $f->partida);
-            if ((int) $f->suficiencia === 1) {
-                $comprometido[$clave] = ($comprometido[$clave] ?? 0) + (float) $f->monto;
+            $monto = (float) $f->monto;
+
+            if ((int) $f->pagado === 1) {
+                $pagado[$clave] = ($pagado[$clave] ?? 0) + $monto;
+            } elseif ((int) $f->devengado === 1) {
+                $devengado[$clave] = ($devengado[$clave] ?? 0) + $monto;
+            } elseif ((int) $f->suficiencia === 1) {
+                $comprometido[$clave] = ($comprometido[$clave] ?? 0) + $monto;
             } else {
-                $enTramite[$clave] = ($enTramite[$clave] ?? 0) + (float) $f->monto;
+                $enTramite[$clave] = ($enTramite[$clave] ?? 0) + $monto;
             }
         }
 
-        return [$comprometido, $enTramite];
+        return [$comprometido, $enTramite, $devengado, $pagado];
     }
 }

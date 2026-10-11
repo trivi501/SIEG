@@ -1,6 +1,6 @@
 import { Link, usePage } from '@inertiajs/react';
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Building2, LayoutGrid, Wallet, ClipboardCheck } from 'lucide-react';
+import { BookOpen, Building2, LayoutGrid, Wallet, ClipboardCheck, TrendingUp } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavAdmin } from '@/components/nav-admin';
 import { NavMain } from '@/components/nav-main';
@@ -34,6 +34,8 @@ function getCurrentPath(): string {
 }
 
 function findActiveSection(path: string): SectionKey | null {
+    // "Ejercicio y control del gasto" es una entrada propia (debajo de Presupuesto), no abre el grupo Requisiciones.
+    if (path.startsWith('/requisiciones/gasto')) return null;
     if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/catalogos/proveedores') || path.startsWith('/modificaciones-presupuestales')) return 'Requisiciones';
     if (path.startsWith('/settings/users') || path.startsWith('/settings/roles') || path.startsWith('/settings/permissions') || path.startsWith('/auditoria')) return 'Administración';
     if (path.startsWith('/settings/profile') || path.startsWith('/settings/security') || path.startsWith('/settings/appearance')) return 'Ajustes';
@@ -66,6 +68,12 @@ const mainNavItems: NavItem[] = [
         permission: 'presupuesto-index',
     },
     {
+        title: 'Ejercicio y control del gasto',
+        href: '/requisiciones/gasto',
+        icon: TrendingUp,
+        permission: 'requisiciones-index',
+    },
+    {
         title: 'Requisiciones',
         icon: ClipboardCheck,
         items: [
@@ -73,7 +81,6 @@ const mainNavItems: NavItem[] = [
             { title: 'Nueva', href: '/requisiciones/crear', permission: 'requisiciones-create' },
             { title: 'Recursos Materiales', href: '/recursos-materiales', permission: 'requisiciones-index' },
             { title: 'Proveedores', href: '/catalogos/proveedores', permission: 'proveedores-index' },
-            { title: 'Cómo va el gasto', href: '/requisiciones/gasto', permission: 'requisiciones-index' },
             { title: 'Modificaciones Presupuestales', href: '/modificaciones-presupuestales', permission: 'modificaciones-index' },
         ],
     },
@@ -87,10 +94,10 @@ const moduleNavItems: NavItem[] = [
         permission: 'catalogos-*',
     },
     {
-        title: 'Secretarías',
-        href: '/secretarias',
+        title: 'Secretarías y direcciones',
+        href: '/catalogos/unidades-administrativas',
         icon: Building2,
-        permission: 'secretarias-index',
+        permission: 'catalogos-unidades-administrativas-index',
     },
 ];
 

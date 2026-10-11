@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Auditoria;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -71,12 +72,13 @@ class EliminarUsuariosSinRol extends Command
             'model_has_permissions' => DB::table('model_has_permissions')->whereIn('model_id', $ids)->where('model_type', User::class)->get(),
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
 
-        DB::transaction(function () use ($ids) {
+        Auditoria::enLote('Eliminación de usuarios sin rol (usuarios:eliminar-sin-rol)', fn () => DB::transaction(function () use ($ids) {
             DB::table('sessions')->whereIn('user_id', $ids)->delete();
             DB::table('model_has_permissions')->whereIn('model_id', $ids)->where('model_type', User::class)->delete();
             DB::table('password_reset_tokens')->whereIn('email', User::whereIn('id', $ids)->pluck('email'))->delete();
-            User::whereIn('id', $ids)->delete();
-        });
+            // Uno por uno para que cada usuario borrado quede en la bitácora de auditoría.
+            User::whereIn('id', $ids)->get()->each(fn (User $u) => $u->delete());
+        }));
 
         $this->info(count($ids).' usuarios eliminados. Respaldo: '.Storage::disk('local')->path($ruta));
         $this->line('Quedan '.User::count().' usuarios.');

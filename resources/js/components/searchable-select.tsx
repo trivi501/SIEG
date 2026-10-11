@@ -31,6 +31,8 @@ export default function SearchableSelect({
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [pos, setPos] = useState({ left: 0, top: 0, width: 240 });
+    // Inline (dentro de un Dialog con scroll): se abre hacia arriba si abajo no cabe la lista.
+    const [haciaArriba, setHaciaArriba] = useState(false);
     const btnRef = useRef<HTMLButtonElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -88,6 +90,30 @@ export default function SearchableSelect({
             );
             const left = Math.min(r.left, window.innerWidth - width - 8);
             setPos({ left: Math.max(left, 8), top: r.bottom + 4, width });
+
+            // Contenedor con scroll más cercano (el Dialog) o la ventana.
+            let limite = window.innerHeight;
+            let topeArriba = 0;
+            let padre = btnRef.current.parentElement;
+
+            while (padre) {
+                const estilo = getComputedStyle(padre).overflowY;
+
+                if (estilo === 'auto' || estilo === 'scroll') {
+                    const c = padre.getBoundingClientRect();
+                    limite = Math.min(limite, c.bottom);
+                    topeArriba = Math.max(topeArriba, c.top);
+                    break;
+                }
+
+                padre = padre.parentElement;
+            }
+
+            const alto = 270; // buscador + lista (max-h-56)
+            setHaciaArriba(
+                limite - r.bottom < alto &&
+                    r.top - topeArriba > limite - r.bottom,
+            );
         }
 
         setQuery('');
@@ -131,7 +157,7 @@ export default function SearchableSelect({
             {open && (
                 <div
                     ref={panelRef}
-                    className={`${inline ? 'absolute top-full left-0 mt-1 max-w-full' : 'fixed'} z-50 rounded-md border border-input bg-background shadow-lg`}
+                    className={`${inline ? `absolute left-0 max-w-full ${haciaArriba ? 'bottom-full mb-1' : 'top-full mt-1'}` : 'fixed'} z-50 rounded-md border border-input bg-background shadow-lg`}
                     style={
                         inline
                             ? { width: '100%' }

@@ -29,7 +29,9 @@ export default function Show({
     tipos,
     origen,
     destino,
+    meses,
 }: {
+    meses: Record<string, string>;
     modificacion: any;
     tipos: Record<string, string>;
     origen: Required<LineaPresupuesto> | null;
@@ -50,17 +52,20 @@ export default function Show({
         );
     };
 
+    const periodo = (mes: number | null) =>
+        mes ? ` · periodo ${meses[mes]}` : '';
+
     const lados = [
         {
             lado: 'origen',
-            titulo: 'Origen (disminuye)',
+            titulo: `Emisor / origen (disminuye)${periodo(modificacion.origen_mes)}`,
             linea: origen,
             signo: -1,
             descripcion: modificacion.origen_descripcion,
         },
         {
             lado: 'destino',
-            titulo: 'Destino (aumenta)',
+            titulo: `Receptor / destino (aumenta)${periodo(modificacion.destino_mes)}`,
             linea: destino,
             signo: 1,
             descripcion: modificacion.destino_descripcion,

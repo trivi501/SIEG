@@ -21,8 +21,8 @@ class OrdenCompraController extends Controller
 
     public function store(Request $request, EgresoRequisicion $requisicion)
     {
-        if ($requisicion->suficiencia !== true) {
-            abort(403, 'Solo se genera orden de compra para requisiciones con suficiencia presupuestal.');
+        if ($requisicion->suficiencia !== true || $requisicion->id_cat_egreso_requisicion_estado !== EgresoRequisicion::COMPROMETIDA) {
+            abort(403, 'Solo se genera orden de compra para requisiciones comprometidas (con suficiencia presupuestal).');
         }
         if ($requisicion->ordenCompra()->exists()) {
             return back()->with('error', 'Esta requisición ya tiene orden de compra.');
@@ -55,7 +55,7 @@ class OrdenCompraController extends Controller
                 'user_id' => auth()->id(),
             ]);
 
-            $this->bitacora($requisicion, "Orden de compra {$orden->folio_completo} generada para {$proveedor->nombre} por $".number_format($orden->importe, 2).'.');
+            $this->bitacora($requisicion, EgresoRequisicion::CON_ORDEN_COMPRA, "Orden de compra {$orden->folio_completo} generada para {$proveedor->nombre} por $".number_format($orden->importe, 2).'.');
         });
 
         return back()->with('success', 'Orden de compra generada.');
@@ -121,10 +121,106 @@ class OrdenCompraController extends Controller
                 'xml_user_id' => auth()->id(),
             ]);
 
-            $this->bitacora($ordenCompra->requisicion, "Factura {$cfdi['uuid']} por $".number_format($cfdi['total'], 2)." cargada a la orden {$ordenCompra->folio_completo}.");
+            $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::CON_FACTURA, "Factura {$cfdi['uuid']} por $".number_format($cfdi['total'], 2)." cargada a la orden {$ordenCompra->folio_completo}.");
         });
 
-        return back()->with('success', 'Factura cargada: el total coincide con lo cotizado.');
+        return back()->with('success', 'Factura cargada: el gasto pasa de comprometido a devengado.');
+    }
+
+    /**
+     * Registra el pago de la orden (momento contable "pagado"). Solo con factura cargada
+     * (devengado), con la CLC generada por el área, y una sola vez.
+     */
+    public function registrarPago(Request $request, OrdenCompra $ordenCompra)
+    {
+        if (! $ordenCompra->xml_uuid) {
+            return back()->with('error', 'Primero hay que cargar la factura (XML) de la orden de compra.');
+        }
+        if (! $ordenCompra->clc_folio_completo) {
+            return back()->with('error', 'Primero el área tiene que generar la CLC de la orden de compra.');
+        }
+        if ($ordenCompra->pago_fecha) {
+            return back()->with('error', 'Esta orden de compra ya tiene su pago registrado.');
+        }
+
+        $validated = $request->validate([
+            'pago_fecha' => ['required', 'date', 'after_or_equal:'.$ordenCompra->fecha->toDateString(), 'before_or_equal:today'],
+            'pago_forma' => ['required', 'in:'.implode(',', array_keys(OrdenCompra::FORMAS_PAGO))],
+            'pago_referencia' => 'required|string|max:100',
+        ], [
+            'pago_fecha.after_or_equal' => 'La fecha de pago no puede ser anterior a la orden de compra.',
+            'pago_fecha.before_or_equal' => 'La fecha de pago no puede ser futura.',
+        ], [
+            'pago_fecha' => 'fecha de pago', 'pago_forma' => 'forma de pago', 'pago_referencia' => 'referencia',
+        ]);
+
+        DB::transaction(function () use ($ordenCompra, $validated) {
+            $ordenCompra->update([...$validated, 'pago_user_id' => auth()->id(), 'pago_registrado_at' => now()]);
+
+            $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::PAGADA, sprintf('Pago de la orden %s registrado: %s %s del %s por $%s.',
+                $ordenCompra->folio_completo, OrdenCompra::FORMAS_PAGO[$validated['pago_forma']], $validated['pago_referencia'],
+                $validated['pago_fecha'], number_format($ordenCompra->importe, 2)));
+        });
+
+        return back()->with('success', 'Pago registrado.');
+    }
+
+    /**
+     * El área genera la CLC (cuenta por liquidar certificada) de una orden de compra con factura:
+     * es la solicitud de pago al proveedor. Folio consecutivo por año: CLC-2026-0001.
+     */
+    public function generarClc(OrdenCompra $ordenCompra)
+    {
+        $requisicion = $ordenCompra->requisicion;
+        $this->autorizarArea($requisicion);
+
+        if (! $ordenCompra->xml_uuid) {
+            return back()->with('error', 'La CLC se genera cuando la orden de compra ya tiene su factura (XML).');
+        }
+        if ($ordenCompra->clc_folio_completo) {
+            return back()->with('error', "Esta orden de compra ya tiene la CLC {$ordenCompra->clc_folio_completo}.");
+        }
+
+        DB::transaction(function () use ($ordenCompra, $requisicion) {
+            $año = (int) now('America/Mexico_City')->format('Y');
+            $folio = (OrdenCompra::where('clc_año', $año)->lockForUpdate()->max('clc_folio') ?? 0) + 1;
+
+            $ordenCompra->update([
+                'clc_folio' => $folio,
+                'clc_año' => $año,
+                'clc_folio_completo' => sprintf('CLC-%d-%04d', $año, $folio),
+                'clc_fecha' => now('America/Mexico_City')->toDateString(),
+                'clc_user_id' => auth()->id(),
+                'clc_generada_at' => now(),
+            ]);
+
+            $this->bitacora($requisicion, EgresoRequisicion::CLC_GENERADA, "CLC {$ordenCompra->clc_folio_completo} generada por $".number_format($ordenCompra->importe, 2)." a favor de {$ordenCompra->proveedor?->nombre}.");
+        });
+
+        return back()->with('success', "CLC {$ordenCompra->clc_folio_completo} generada.");
+    }
+
+    public function clcPdf(OrdenCompra $ordenCompra)
+    {
+        abort_unless($ordenCompra->clc_folio_completo, 404);
+        $this->autorizarArea($ordenCompra->requisicion);
+
+        $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');
+
+        return Pdf::loadView('ordenes-compra.clc', ['orden' => $ordenCompra])
+            ->stream("{$ordenCompra->clc_folio_completo}.pdf");
+    }
+
+    /** La CLC es del área que hizo la requisición (Admin y Recursos Materiales ven todas). */
+    private function autorizarArea(EgresoRequisicion $requisicion): void
+    {
+        $user = auth()->user();
+        if ($user->hasRole(['Super Admin', 'Admin']) || $user->can('ordenes-compra-create')) {
+            return;
+        }
+
+        $unidad = $user->id_cat_egreso_unidad_administrativa;
+        abort_unless($unidad && (int) $unidad === (int) $requisicion->id_cat_egreso_unidad_administrativa, 403, 'Esta requisición no pertenece a tu área.');
     }
 
     public function descargarXml(OrdenCompra $ordenCompra)
@@ -169,14 +265,20 @@ class OrdenCompraController extends Controller
         ];
     }
 
-    private function bitacora(EgresoRequisicion $requisicion, string $observaciones): void
+    /** Pasa la requisición al estado $nuevo y lo deja en su bitácora. */
+    private function bitacora(EgresoRequisicion $requisicion, int $nuevo, string $observaciones): void
     {
+        $anterior = $requisicion->id_cat_egreso_requisicion_estado;
+        if ($anterior !== $nuevo) {
+            $requisicion->update(['id_cat_egreso_requisicion_estado' => $nuevo]);
+        }
+
         $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
         EgresoRequisicionBitacora::create([
             'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
             'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-            'id_cat_egreso_requisicion_estado_anterior' => $requisicion->id_cat_egreso_requisicion_estado,
-            'id_cat_egreso_requisicion_estado_nuevo' => $requisicion->id_cat_egreso_requisicion_estado,
+            'id_cat_egreso_requisicion_estado_anterior' => $anterior,
+            'id_cat_egreso_requisicion_estado_nuevo' => $nuevo,
             'id_tb_usuarios' => 1,
             'observaciones' => $observaciones,
         ]);

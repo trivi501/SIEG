@@ -28,9 +28,14 @@
         $money = fn ($n) => '$'.number_format((float) $n, 2);
         $tz = 'America/Mexico_City'; // la app corre en UTC; el formato se imprime en hora local
         $lados = [
-            'origen' => ['etiqueta' => 'Origen (disminuye)', 'linea' => $origen, 'signo' => '-'],
-            'destino' => ['etiqueta' => 'Destino (aumenta)', 'linea' => $destino, 'signo' => '+'],
+            'origen' => ['etiqueta' => 'Emisor (disminuye)', 'linea' => $origen, 'signo' => '-'],
+            'destino' => ['etiqueta' => 'Receptor (aumenta)', 'linea' => $destino, 'signo' => '+'],
         ];
+        foreach (['origen', 'destino'] as $lado) {
+            if ($mes = $modificacion->{$lado.'_mes'}) {
+                $lados[$lado]['etiqueta'] .= ' · '.mb_strtoupper(\App\Services\SaldosMensuales::MESES[$mes]);
+            }
+        }
     @endphp
 
     <div class="header">

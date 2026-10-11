@@ -1,5 +1,5 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { Eye, FileText, Plus, Search, X } from 'lucide-react';
+import { Check, Eye, FileText, Plus, Search, X } from 'lucide-react';
 import { useState } from 'react';
 import EstadoModificacionBadge from '@/components/estado-modificacion-badge';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,9 @@ interface Modificacion {
     tipo: string;
     estado: string;
     origen_descripcion: string | null;
+    origen_mes: number | null;
     destino_descripcion: string | null;
+    destino_mes: number | null;
     importe: number;
     created_at: string;
     resuelto_at: string | null;
@@ -45,13 +47,63 @@ export default function Index({
     modificaciones,
     filters,
     tipos,
+    meses,
 }: {
     modificaciones: Paginado<Modificacion>;
     filters: Record<string, string>;
     tipos: Record<string, string>;
+    meses: Record<string, string>;
 }) {
     const permisos =
         (usePage().props.userPermissions as string[] | undefined) ?? [];
+    const puedeAutorizar = permisos.includes('modificaciones-autorizar');
+    const [resolviendo, setResolviendo] = useState<number | null>(null);
+
+    const resolver = (m: Modificacion, accion: 'autorizar' | 'rechazar') => {
+        let observaciones: string | null = '';
+
+        if (accion === 'autorizar') {
+            if (
+                !confirm(
+                    `¿Aceptar la modificación ${m.folio_completo} por ${money(m.importe)}? El presupuesto se actualiza al momento.`,
+                )
+            ) {
+                return;
+            }
+        } else {
+            observaciones = window.prompt(
+                `Motivo por el que no procede ${m.folio_completo} (obligatorio):`,
+            );
+
+            if (observaciones === null) {
+                return;
+            }
+
+            if (!observaciones.trim()) {
+                alert('El motivo del rechazo es obligatorio.');
+
+                return;
+            }
+        }
+
+        setResolviendo(m.id);
+        router.post(
+            `/modificaciones-presupuestales/${m.id}/${accion}`,
+            { observaciones },
+            {
+                preserveScroll: true,
+                onError: (errores) => alert(Object.values(errores).join('\n')),
+                onFinish: () => setResolviendo(null),
+            },
+        );
+    };
+
+    const periodo = (mes: number | null) =>
+        mes ? (
+            <span className="ml-1 rounded bg-muted px-1 text-[10px] font-medium uppercase">
+                {meses[mes]}
+            </span>
+        ) : null;
     const [f, setF] = useState({
         folio: filters?.folio ?? '',
         tipo: filters?.tipo ?? '',
@@ -242,6 +294,7 @@ export default function Index({
                                                         −
                                                     </span>{' '}
                                                     {m.origen_descripcion}
+                                                    {periodo(m.origen_mes)}
                                                 </div>
                                             )}
                                             {m.destino_descripcion && (
@@ -255,6 +308,7 @@ export default function Index({
                                                         +
                                                     </span>{' '}
                                                     {m.destino_descripcion}
+                                                    {periodo(m.destino_mes)}
                                                 </div>
                                             )}
                                         </TableCell>
@@ -273,7 +327,47 @@ export default function Index({
                                             )}
                                         </TableCell>
                                         <TableCell>
-                                            <div className="flex gap-1">
+                                            <div className="flex items-center gap-1">
+                                                {puedeAutorizar &&
+                                                    m.estado ===
+                                                        'pendiente' && (
+                                                        <>
+                                                            <Button
+                                                                size="sm"
+                                                                className="bg-green-700 hover:bg-green-800"
+                                                                disabled={
+                                                                    resolviendo ===
+                                                                    m.id
+                                                                }
+                                                                onClick={() =>
+                                                                    resolver(
+                                                                        m,
+                                                                        'autorizar',
+                                                                    )
+                                                                }
+                                                            >
+                                                                <Check className="mr-1 h-4 w-4" />
+                                                                Aceptar
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="destructive"
+                                                                disabled={
+                                                                    resolviendo ===
+                                                                    m.id
+                                                                }
+                                                                onClick={() =>
+                                                                    resolver(
+                                                                        m,
+                                                                        'rechazar',
+                                                                    )
+                                                                }
+                                                            >
+                                                                <X className="mr-1 h-4 w-4" />
+                                                                Rechazar
+                                                            </Button>
+                                                        </>
+                                                    )}
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"

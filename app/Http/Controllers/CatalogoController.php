@@ -38,7 +38,6 @@ class CatalogoController extends Controller
         return Inertia::render('catalogos/Index', [
             'grupos' => Catalogos::GRUPOS,
             'catalogos' => $catalogos,
-            'secretarias' => $user->checkPermissionTo('secretarias-index'),
         ]);
     }
 

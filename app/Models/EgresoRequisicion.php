@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class EgresoRequisicion extends Model
 {
+    use Auditable;
+
     protected $table = 'tb_egreso_requisicion';
 
     protected $primaryKey = 'id_tb_egreso_requisicion';
@@ -15,6 +18,19 @@ class EgresoRequisicion extends Model
     protected $keyType = 'int';
 
     public $timestamps = false;
+
+    /** Estados de cat_egreso_requisicion_estado (1–6 del sistema anterior). */
+    public const EN_COTIZACION = 6;
+
+    public const COMPROMETIDA = 7;
+
+    public const CON_ORDEN_COMPRA = 8;
+
+    public const CON_FACTURA = 9;
+
+    public const CLC_GENERADA = 10;
+
+    public const PAGADA = 11;
 
     protected $fillable = [
         'id_tb_egreso_requisicion',
@@ -47,6 +63,9 @@ class EgresoRequisicion extends Model
         'suficiencia',
         'suficiencia_fecha',
         'suficiencia_user_id',
+        'extemporanea',
+        'extemporanea_user_id',
+        'extemporanea_autorizada_at',
     ];
 
     protected function casts(): array
@@ -54,7 +73,20 @@ class EgresoRequisicion extends Model
         return [
             'suficiencia' => 'boolean',
             'suficiencia_fecha' => 'datetime',
+            'extemporanea' => 'boolean',
+            'extemporanea_autorizada_at' => 'datetime',
         ];
+    }
+
+    /** Capturada fuera del periodo y aún sin autorización de la Subdirección Administrativa. */
+    public function extemporaneaPendiente(): bool
+    {
+        return (bool) $this->extemporanea && $this->extemporanea_autorizada_at === null;
+    }
+
+    public function extemporaneaAutorizador()
+    {
+        return $this->belongsTo(User::class, 'extemporanea_user_id');
     }
 
     public function ordenCompra()
@@ -121,5 +153,4 @@ class EgresoRequisicion extends Model
     {
         return $this->hasMany(EgresoRequisicionPartida::class, 'id_tb_egreso_requisicion', 'id_tb_egreso_requisicion');
     }
-
 }

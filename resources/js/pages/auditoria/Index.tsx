@@ -28,6 +28,7 @@ interface Movimiento {
     auditable_type: string;
     registro: string;
     catalogo: string | null;
+    enlace: string | null;
     etiquetas: Record<string, string>;
     descripcion: string | null;
     lote: string | null;
@@ -91,8 +92,11 @@ export default function Index({
                         Bitácora de auditoría
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                        Quién dio de alta, modificó o dio de baja cada registro
-                        de los catálogos, con el valor anterior y el nuevo.
+                        Quién dio de alta, modificó o eliminó cada registro del
+                        sistema (requisiciones, órdenes de compra,
+                        modificaciones, presupuesto, catálogos, usuarios y
+                        roles), con el valor anterior y el nuevo, y los accesos
+                        al sistema.
                     </p>
                 </div>
 
@@ -106,7 +110,7 @@ export default function Index({
                                 }
                                 className={control}
                             >
-                                <option value="">Todos los catálogos</option>
+                                <option value="">Todos los módulos</option>
                                 {tipos.map((t) => (
                                     <option key={t.valor} value={t.valor}>
                                         {t.etiqueta}
@@ -192,7 +196,7 @@ export default function Index({
                                     <TableHead>Fecha</TableHead>
                                     <TableHead>Usuario</TableHead>
                                     <TableHead>Acción</TableHead>
-                                    <TableHead>Catálogo</TableHead>
+                                    <TableHead>Módulo</TableHead>
                                     <TableHead>Cambios</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -224,9 +228,9 @@ export default function Index({
                                             <AccionBadge accion={m.accion} />
                                         </TableCell>
                                         <TableCell className="min-w-40">
-                                            {m.catalogo ? (
+                                            {m.enlace ? (
                                                 <Link
-                                                    href={`/catalogos/${m.catalogo}`}
+                                                    href={m.enlace}
                                                     className="underline-offset-2 hover:underline"
                                                 >
                                                     {m.tipo}
@@ -234,19 +238,27 @@ export default function Index({
                                             ) : (
                                                 m.tipo
                                             )}
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    aplicar({
-                                                        tipo: m.auditable_type,
-                                                        registro: m.registro,
-                                                    })
-                                                }
-                                                className="block text-xs text-muted-foreground hover:underline"
-                                                title="Ver todos los movimientos de este registro"
-                                            >
-                                                Registro #{m.registro}
-                                            </button>
+                                            {m.registro && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        aplicar({
+                                                            tipo: m.auditable_type,
+                                                            registro:
+                                                                m.registro,
+                                                        })
+                                                    }
+                                                    className="block text-xs text-muted-foreground hover:underline"
+                                                    title="Ver todos los movimientos de este registro"
+                                                >
+                                                    Registro #{m.registro}
+                                                </button>
+                                            )}
+                                            {!m.lote && m.descripcion && (
+                                                <span className="block text-xs text-muted-foreground">
+                                                    {m.descripcion}
+                                                </span>
+                                            )}
                                             {m.lote && (
                                                 <button
                                                     type="button"
@@ -267,6 +279,7 @@ export default function Index({
                                                 antes={m.antes}
                                                 despues={m.despues}
                                                 etiquetas={m.etiquetas}
+                                                soloEtiquetados={!!m.catalogo}
                                             />
                                         </TableCell>
                                     </TableRow>

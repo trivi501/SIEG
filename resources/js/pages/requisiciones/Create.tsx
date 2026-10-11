@@ -1,8 +1,9 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useRef } from 'react';
 import LineaPresupuestoCeldas from '@/components/linea-presupuesto-celdas';
 import type { SeleccionLinea } from '@/components/linea-presupuesto-celdas';
+import { Button } from '@/components/ui/button';
 import type { LineaPresupuesto } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
@@ -24,8 +25,9 @@ interface Fila {
     descripcion: string;
 }
 
-export default function Create({ catalogs, unidadDefault }: { catalogs: Catalogs; unidadDefault?: number | null }) {
-    const { data, setData, post, processing, errors } = useForm({
+export default function Create({ catalogs, unidadDefault, periodoCaptura }: { catalogs: Catalogs; unidadDefault?: number | null; periodoCaptura: { inicio: number; fin: number; abierto: boolean } }) {
+    const conceptoRef = useRef<HTMLTextAreaElement>(null);
+    const { data, setData, post, processing, errors, setError, clearErrors } = useForm({
         id_cat_egreso_unidad_administrativa: String(unidadDefault ?? ''),
         concepto: '',
         fecha_tramite: new Date().toISOString().slice(0, 10),
@@ -67,6 +69,14 @@ export default function Create({ catalogs, unidadDefault }: { catalogs: Catalogs
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!data.concepto.trim()) {
+            setError('concepto', 'El concepto es obligatorio: no se puede guardar vacío.');
+            conceptoRef.current?.focus();
+
+            return;
+        }
+
         post('/requisiciones');
     };
 
@@ -81,6 +91,17 @@ export default function Create({ catalogs, unidadDefault }: { catalogs: Catalogs
                     <h3 className="text-lg font-medium">Nueva Requisición</h3>
                 </div>
 
+                {periodoCaptura.abierto ? (
+                    <p className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
+                        Periodo de captura abierto: del {periodoCaptura.inicio} al {periodoCaptura.fin} de cada mes.
+                    </p>
+                ) : (
+                    <p role="alert" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        <strong>Fuera del periodo de captura</strong> (del {periodoCaptura.inicio} al {periodoCaptura.fin} de cada mes). La requisición
+                        quedará como <strong>extemporánea</strong> y no se podrá enviar a revisión hasta que la autorice la Subdirección
+                        Administrativa (Adquisiciones).
+                    </p>
+                )}
                 <form onSubmit={submit} className="w-full space-y-4">
                     {/* Fecha */}
                     <div className="flex items-center gap-8">
@@ -171,13 +192,26 @@ export default function Create({ catalogs, unidadDefault }: { catalogs: Catalogs
 
                     {/* Concepto */}
                     <div>
-                        <span className="font-semibold text-sm">CONCEPTO:</span>
+                        <span className="font-semibold text-sm">CONCEPTO: <span className="text-destructive">*</span></span>
                         <textarea
+                            ref={conceptoRef}
                             value={data.concepto}
-                            onChange={(e) => setData('concepto', e.target.value)}
-                            className="mt-1 block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring min-h-[60px]"
+                            onChange={(e) => {
+                                setData('concepto', e.target.value);
+
+                                if (e.target.value.trim()) {
+                                    clearErrors('concepto');
+                                }
+                            }}
+                            aria-invalid={!!errors.concepto}
+                            className={`mt-1 block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring min-h-[60px] ${errors.concepto ? 'border-2 border-destructive' : ''}`}
                             placeholder="Descripción del concepto..."
                         />
+                        {errors.concepto && (
+                            <p role="alert" className="mt-1 rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+                                ⚠ {errors.concepto}
+                            </p>
+                        )}
                     </div>
 
                     {/* Botones */}

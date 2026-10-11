@@ -14,19 +14,32 @@ export interface LineaPresupuesto {
     vigente?: number;
     comprometido?: number;
     en_tramite?: number;
+    devengado?: number;
+    pagado?: number;
     disponible: number;
+    /** Lo que quedó disponible en los meses anteriores y se corrió al mes actual. */
+    saldo_corrido?: number;
+    /** Saldo corrido + asignado, modificado y comprometido del mes actual. */
+    disponible_mes?: number;
 }
+
+/**
+ * Formato de números de todo el sistema: coma para miles y millones, punto para los centavos
+ * (1,234,567.89). Se fija el formato en lugar de usar el idioma del navegador, que en algunos
+ * equipos pone puntos en los miles.
+ */
+const formatoNumero = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+});
+
+export const numero = (n: number | string | null | undefined) =>
+    formatoNumero.format(Number(n ?? 0));
 
 export const money = (n: number | string | null | undefined) => {
     const valor = Number(n ?? 0);
 
-    return (
-        (valor < 0 ? '-$' : '$') +
-        Math.abs(valor).toLocaleString('es-MX', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-        })
-    );
+    return (valor < 0 ? '-$' : '$') + formatoNumero.format(Math.abs(valor));
 };
 
 /** Fecha/hora de Laravel (ISO en UTC) en la hora local del navegador. */
@@ -46,4 +59,3 @@ export const etiquetaLinea = (l: LineaPresupuesto) =>
         /\s+/g,
         ' ',
     );
-

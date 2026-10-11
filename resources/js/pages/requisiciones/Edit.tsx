@@ -1,5 +1,6 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
+import { useRef } from 'react';
 import LineaPresupuestoCeldas from '@/components/linea-presupuesto-celdas';
 import type { SeleccionLinea } from '@/components/linea-presupuesto-celdas';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,7 @@ interface Fila {
     cantidad: string;
     precio_unitario: string;
     descripcion: string;
+    lleva_iva: boolean;
 }
 
 export default function Edit({
@@ -51,6 +53,7 @@ export default function Edit({
                       ? parseFloat(d.precio_unitario).toString()
                       : '',
                   descripcion: d.descripcion ?? '',
+                  lleva_iva: parseFloat(d.iva_factor || 0) > 0,
               }))
             : [
                   {
@@ -60,6 +63,7 @@ export default function Edit({
                       cantidad: '1',
                       precio_unitario: '',
                       descripcion: '',
+                      lleva_iva: false,
                   },
               ];
 
@@ -67,17 +71,19 @@ export default function Edit({
         (d: any) => parseFloat(d.iva_factor || 0) > 0,
     );
 
-    const { data, setData, put, processing, errors } = useForm({
-        id_cat_egreso_unidad_administrativa: String(
-            requisicion.id_cat_egreso_unidad_administrativa ?? '',
-        ),
-        concepto: requisicion.observaciones ?? '',
-        fecha_tramite: requisicion.solicitado
-            ? String(requisicion.solicitado).slice(0, 10)
-            : new Date().toISOString().slice(0, 10),
-        incluye_iva: incluyeIvaInicial,
-        filas: filasIniciales,
-    });
+    const conceptoRef = useRef<HTMLTextAreaElement>(null);
+    const { data, setData, put, processing, errors, setError, clearErrors } =
+        useForm({
+            id_cat_egreso_unidad_administrativa: String(
+                requisicion.id_cat_egreso_unidad_administrativa ?? '',
+            ),
+            concepto: requisicion.observaciones ?? '',
+            fecha_tramite: requisicion.solicitado
+                ? String(requisicion.solicitado).slice(0, 10)
+                : new Date().toISOString().slice(0, 10),
+            incluye_iva: incluyeIvaInicial,
+            filas: filasIniciales,
+        });
 
     const agregarFila = () => {
         setData('filas', [
@@ -89,6 +95,7 @@ export default function Edit({
                 cantidad: '1',
                 precio_unitario: '',
                 descripcion: '',
+                lleva_iva: false,
             },
         ]);
     };
@@ -98,7 +105,11 @@ export default function Edit({
             data.filas.filter((_, idx) => idx !== i),
         );
     };
-    const actualizarFila = (i: number, campo: keyof Fila, valor: string) => {
+    const actualizarFila = (
+        i: number,
+        campo: keyof Fila,
+        valor: string | boolean,
+    ) => {
         const filas = [...data.filas];
         filas[i] = { ...filas[i], [campo]: valor };
         setData('filas', filas);
@@ -137,11 +148,22 @@ export default function Edit({
             (parseFloat(f.precio_unitario) || 0) *
             (parseFloat(f.cantidad) || 0);
 
-        return acc + sub * (data.incluye_iva ? 1.16 : 1);
+        return acc + sub * (f.lleva_iva ? 1.16 : 1);
     }, 0);
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!esCotizacion && !data.concepto.trim()) {
+            setError(
+                'concepto',
+                'El concepto es obligatorio: no se puede guardar vacío.',
+            );
+            conceptoRef.current?.focus();
+
+            return;
+        }
+
         put(`/requisiciones/${requisicion.id_tb_egreso_requisicion}`);
     };
 
@@ -304,19 +326,40 @@ export default function Edit({
                                         </td>
                                         <td className="p-1">
                                             {esCotizacion ? (
-                                                <input
-                                                    type="text"
-                                                    value={fila.precio_unitario}
-                                                    onChange={(e) =>
-                                                        actualizarFila(
-                                                            i,
-                                                            'precio_unitario',
-                                                            e.target.value,
-                                                        )
-                                                    }
-                                                    className="w-full rounded border-input px-2 py-1.5 text-center text-xs shadow-sm"
-                                                    placeholder="0.00"
-                                                />
+                                                <>
+                                                    <input
+                                                        type="text"
+                                                        value={
+                                                            fila.precio_unitario
+                                                        }
+                                                        onChange={(e) =>
+                                                            actualizarFila(
+                                                                i,
+                                                                'precio_unitario',
+                                                                e.target.value,
+                                                            )
+                                                        }
+                                                        className="w-full rounded border-input px-2 py-1.5 text-center text-xs shadow-sm"
+                                                        placeholder="0.00"
+                                                    />
+                                                    <label className="mt-1 flex items-center justify-center gap-1 text-xs">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={
+                                                                fila.lleva_iva
+                                                            }
+                                                            onChange={(e) =>
+                                                                actualizarFila(
+                                                                    i,
+                                                                    'lleva_iva',
+                                                                    e.target
+                                                                        .checked,
+                                                                )
+                                                            }
+                                                        />
+                                                        IVA
+                                                    </label>
+                                                </>
                                             ) : (
                                                 <span className="block px-2 py-1.5 text-center text-xs text-muted-foreground">
                                                     —
@@ -375,35 +418,41 @@ export default function Edit({
                     </div>
 
                     <div>
-                        <span className="text-sm font-semibold">CONCEPTO:</span>
+                        <span className="text-sm font-semibold">
+                            CONCEPTO:{' '}
+                            <span className="text-destructive">*</span>
+                        </span>
                         {esCotizacion ? (
                             <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
                                 {data.concepto || '—'}
                             </p>
                         ) : (
                             <textarea
+                                ref={conceptoRef}
                                 value={data.concepto}
-                                onChange={(e) =>
-                                    setData('concepto', e.target.value)
-                                }
-                                className="mt-1 block min-h-[60px] w-full rounded-md border-input px-3 py-2 text-sm shadow-sm"
+                                onChange={(e) => {
+                                    setData('concepto', e.target.value);
+
+                                    if (e.target.value.trim()) {
+                                        clearErrors('concepto');
+                                    }
+                                }}
+                                aria-invalid={!!errors.concepto}
+                                className={`mt-1 block min-h-[60px] w-full rounded-md border-input px-3 py-2 text-sm shadow-sm ${errors.concepto ? 'border-2 border-destructive' : ''}`}
                             />
+                        )}
+                        {errors.concepto && (
+                            <p
+                                role="alert"
+                                className="mt-1 rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive"
+                            >
+                                ⚠ {errors.concepto}
+                            </p>
                         )}
                     </div>
 
                     {esCotizacion && (
                         <div className="flex items-center gap-8">
-                            <label className="flex items-center gap-2 text-sm">
-                                <input
-                                    type="checkbox"
-                                    checked={data.incluye_iva}
-                                    onChange={(e) =>
-                                        setData('incluye_iva', e.target.checked)
-                                    }
-                                    className="rounded border-input"
-                                />
-                                Lleva IVA
-                            </label>
                             <span className="text-sm">
                                 <span className="font-semibold">
                                     Monto total del trámite:

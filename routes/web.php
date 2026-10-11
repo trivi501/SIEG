@@ -8,7 +8,6 @@ use App\Http\Controllers\EgresoRequisicionController;
 use App\Http\Controllers\ModificacionPresupuestalController;
 use App\Http\Controllers\OrdenCompraController;
 use App\Http\Controllers\PresupuestoController;
-use App\Http\Controllers\SecretariaController;
 use App\Http\Controllers\SupportTicketController;
 use Illuminate\Support\Facades\Route;
 use Rap2hpoutre\LaravelLogViewer\LogViewerController;
@@ -24,16 +23,20 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware('permission:presupuesto-index')->group(function () {
         Route::get('presupuesto', [PresupuestoController::class, 'index'])->name('presupuesto');
     });
+    Route::middleware('permission:presupuesto-create')->group(function () {
+        Route::get('presupuesto/crear', [PresupuestoController::class, 'create'])->name('presupuesto.create');
+        Route::post('presupuesto', [PresupuestoController::class, 'store'])->name('presupuesto.store');
+    });
     Route::middleware('permission:presupuesto-edit')->group(function () {
         Route::get('presupuesto/{presupuesto}/edit', [PresupuestoController::class, 'edit'])->name('presupuesto.edit');
         Route::patch('presupuesto/{presupuesto}', [PresupuestoController::class, 'update'])->name('presupuesto.update');
     });
-    Route::post('presupuesto/import', [PresupuestoController::class, 'import'])->name('presupuesto.import')->middleware('permission:presupuesto-import');
+    Route::post('presupuesto/correr-saldos', [PresupuestoController::class, 'correrSaldos'])->name('presupuesto.correr-saldos')->middleware('permission:presupuesto-correr-saldos');
+    Route::post('presupuesto/import',[PresupuestoController::class, 'import'])->name('presupuesto.import')->middleware('permission:presupuesto-import');
     Route::delete('presupuesto', [PresupuestoController::class, 'destroy'])->name('presupuesto.destroy')->middleware('permission:presupuesto-delete');
 
-    // Secretarías
-    Route::resource('secretarias', SecretariaController::class)
-        ->middleware('permission:secretarias-index|secretarias-create|secretarias-edit|secretarias-delete');
+    // Secretarías y direcciones son un solo catálogo (cat_egreso_unidad_administrativa).
+    Route::redirect('secretarias', '/catalogos/unidades-administrativas');
 
     // Support Tickets
     Route::get('support-tickets', [SupportTicketController::class, 'index'])->name('support-tickets.index')->middleware('permission:tickets-index');
@@ -54,7 +57,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Requisiciones
     Route::get('requisiciones', [EgresoRequisicionController::class, 'index'])->name('requisiciones.index')->middleware('permission:requisiciones-index');
     Route::get('requisiciones/gasto', [EgresoRequisicionController::class, 'gasto'])->name('requisiciones.gasto')->middleware('permission:requisiciones-index');
+    Route::get('requisiciones/gasto/exportar', [EgresoRequisicionController::class, 'exportarGasto'])->name('requisiciones.gasto.exportar')->middleware('permission:requisiciones-index');
     Route::get('requisiciones/{requisicion}/pdf', [EgresoRequisicionController::class, 'pdf'])->name('requisiciones.pdf')->middleware('permission:requisiciones-index');
+    Route::post('requisiciones/{requisicion}/autorizar-extemporanea', [EgresoRequisicionController::class, 'autorizarExtemporanea'])->name('requisiciones.extemporanea')->middleware('permission:requisiciones-extemporaneas');
     Route::post('requisiciones/{requisicion}/enviar', [EgresoRequisicionController::class, 'enviarRevision'])->name('requisiciones.enviar')->middleware('permission:requisiciones-create');
     Route::post('requisiciones/{requisicion}/aprobar', [EgresoRequisicionController::class, 'aprobar'])->name('requisiciones.aprobar')->middleware('permission:requisiciones-edit');
     Route::post('requisiciones/{requisicion}/rechazar', [EgresoRequisicionController::class, 'rechazar'])->name('requisiciones.rechazar')->middleware('permission:requisiciones-edit');
@@ -72,7 +77,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('requisiciones/{requisicion}/orden-compra', [OrdenCompraController::class, 'store'])->name('ordenes-compra.store')->middleware('permission:ordenes-compra-create');
     Route::get('ordenes-compra/{ordenCompra}/pdf', [OrdenCompraController::class, 'pdf'])->name('ordenes-compra.pdf')->middleware('permission:requisiciones-index');
     Route::post('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'cargarXml'])->name('ordenes-compra.xml')->middleware('permission:ordenes-compra-create');
+    Route::post('ordenes-compra/{ordenCompra}/pago', [OrdenCompraController::class, 'registrarPago'])->name('ordenes-compra.pago')->middleware('permission:ordenes-compra-pagar');
     Route::get('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'descargarXml'])->name('ordenes-compra.xml.descargar')->middleware('permission:requisiciones-index');
+    Route::post('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'generarClc'])->name('ordenes-compra.clc')->middleware('permission:requisiciones-clc');
+    Route::get('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'clcPdf'])->name('ordenes-compra.clc.pdf')->middleware('permission:requisiciones-index');
 
     // Proveedores: ahora es un catálogo más (/catalogos/proveedores)
     Route::redirect('proveedores', '/catalogos/proveedores');

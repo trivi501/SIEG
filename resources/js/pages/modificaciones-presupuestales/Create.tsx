@@ -26,19 +26,55 @@ function Saldo({
     linea,
     signo,
     importe,
+    disponibleMes,
+    nombreMes,
 }: {
     linea?: Required<LineaPresupuesto>;
     signo: 1 | -1;
     importe: number;
+    disponibleMes?: number;
+    nombreMes?: string;
 }) {
     if (!linea) {
         return null;
     }
 
     const despues = linea.disponible + signo * importe;
+    const despuesMes =
+        disponibleMes === undefined
+            ? undefined
+            : disponibleMes + signo * importe;
 
     return (
         <div className="mt-2 grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-xs">
+            {disponibleMes !== undefined && despuesMes !== undefined && (
+                <>
+                    <div className="col-span-1">
+                        <span className="text-muted-foreground">Periodo:</span>{' '}
+                        <span className="capitalize">{nombreMes}</span>
+                    </div>
+                    <div>
+                        <span className="text-muted-foreground">
+                            Disponible del mes:
+                        </span>{' '}
+                        {money(disponibleMes)}
+                    </div>
+                    <div>
+                        <span className="text-muted-foreground">
+                            Del mes después:
+                        </span>{' '}
+                        <span
+                            className={
+                                despuesMes < 0
+                                    ? 'font-semibold text-destructive'
+                                    : 'font-semibold'
+                            }
+                        >
+                            {money(despuesMes)}
+                        </span>
+                    </div>
+                </>
+            )}
             <div>
                 <span className="text-muted-foreground">Vigente:</span>{' '}
                 {money(linea.vigente)}
@@ -71,7 +107,13 @@ export default function Create({
     requisicion,
     destinoSugerido,
     importeSugerido,
+    meses,
+    mesActual,
+    disponiblesMes,
 }: {
+    meses: Record<string, string>;
+    mesActual: number;
+    disponiblesMes: Record<string, Record<string, number>>;
     lineas: Required<LineaPresupuesto>[];
     tipos: Record<string, string>;
     requisicion: {
@@ -84,7 +126,9 @@ export default function Create({
     const { data, setData, post, processing, errors } = useForm({
         tipo: 'traspaso',
         origen: '',
+        origen_mes: String(mesActual),
         destino: destinoSugerido ?? '',
+        destino_mes: String(mesActual),
         importe: importeSugerido ? String(importeSugerido) : '',
         justificacion: requisicion
             ? `Para dar suficiencia a la requisición ${requisicion.folio_completo}.`
@@ -111,6 +155,32 @@ export default function Create({
     const origen = lineas.find((l) => l.clave === data.origen);
     const destino = lineas.find((l) => l.clave === data.destino);
     const importe = parseFloat(data.importe) || 0;
+
+    const selectorMes = (
+        campo: 'origen_mes' | 'destino_mes',
+        etiqueta: string,
+    ) => (
+        <div className="mt-2 flex items-center gap-2">
+            <label className="text-sm font-medium" htmlFor={campo}>
+                {etiqueta}
+            </label>
+            <select
+                id={campo}
+                value={data[campo]}
+                onChange={(e) => setData(campo, e.target.value)}
+                className="rounded-md border border-input bg-transparent px-2 py-1 text-sm capitalize"
+            >
+                {Object.entries(meses).map(([numero, nombre]) => (
+                    <option key={numero} value={numero} className="capitalize">
+                        {nombre}
+                    </option>
+                ))}
+            </select>
+            {errors[campo] && (
+                <p className="text-sm text-destructive">{errors[campo]}</p>
+            )}
+        </div>
+    );
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -175,13 +245,14 @@ export default function Create({
 
                     <Card>
                         <CardHeader>
-                            <CardTitle>Partidas</CardTitle>
+                            <CardTitle>Emisor y receptor</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
                             {usaOrigen && (
                                 <div>
                                     <label className="text-sm font-medium">
-                                        Origen (de donde sale el recurso)
+                                        Emisor / origen (de donde sale el
+                                        recurso)
                                     </label>
                                     <SearchableSelect
                                         value={data.origen}
@@ -195,17 +266,30 @@ export default function Create({
                                             {errors.origen}
                                         </p>
                                     )}
+                                    {selectorMes(
+                                        'origen_mes',
+                                        'Periodo del que sale:',
+                                    )}
                                     <Saldo
                                         linea={origen}
                                         signo={-1}
                                         importe={importe}
+                                        disponibleMes={
+                                            origen
+                                                ? disponiblesMes[
+                                                      origen.clave
+                                                  ]?.[data.origen_mes]
+                                                : undefined
+                                        }
+                                        nombreMes={meses[data.origen_mes]}
                                     />
                                 </div>
                             )}
                             {usaDestino && (
                                 <div>
                                     <label className="text-sm font-medium">
-                                        Destino (la que recibe el recurso)
+                                        Receptor / destino (la que recibe el
+                                        recurso)
                                     </label>
                                     <SearchableSelect
                                         value={data.destino}
@@ -219,10 +303,22 @@ export default function Create({
                                             {errors.destino}
                                         </p>
                                     )}
+                                    {selectorMes(
+                                        'destino_mes',
+                                        'Periodo al que entra:',
+                                    )}
                                     <Saldo
                                         linea={destino}
                                         signo={1}
                                         importe={importe}
+                                        disponibleMes={
+                                            destino
+                                                ? disponiblesMes[
+                                                      destino.clave
+                                                  ]?.[data.destino_mes]
+                                                : undefined
+                                        }
+                                        nombreMes={meses[data.destino_mes]}
                                     />
                                 </div>
                             )}

@@ -23,4 +23,10 @@ export interface PresupuestoEgreso {
     OCTUBRE: number | null;
     NOV: number | null;
     DIC: number | null;
+    /** Importe total menos la suma de los meses (0 = la distribución cuadra). */
+    diferencia?: number;
+    /** Momentos del gasto de la línea (lista del presupuesto). */
+    comprometido?: number;
+    devengado?: number;
+    pagado?: number;
 }

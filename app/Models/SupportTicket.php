@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Model;
 
 class SupportTicket extends Model
 {
+    use Auditable;
+
     protected $fillable = [
         'user_id', 'assigned_to', 'title', 'description', 'url', 'image', 'priority', 'status',
     ];
