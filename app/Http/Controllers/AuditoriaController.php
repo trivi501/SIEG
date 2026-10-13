@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Catalogos\Catalogos;
 use App\Models\Auditoria;
+use App\Models\ClcRelacion;
 use App\Models\EgresoRequisicion;
 use App\Models\EgresoRequisicionDetalle;
 use App\Models\ModificacionPresupuestal;
@@ -38,6 +39,9 @@ class AuditoriaController extends Controller
             'id_tb_egreso_requisicion' => 'Requisición', 'proveedor_id' => 'Proveedor', 'folio_completo' => 'Folio',
             'fecha' => 'Fecha', 'importe' => 'Importe', 'observaciones' => 'Observaciones',
             'xml_uuid' => 'UUID de la factura', 'xml_rfc_emisor' => 'RFC emisor', 'xml_total' => 'Total de la factura',
+        ]],
+        ClcRelacion::class => ['Relaciones de CLC', [
+            'folio_completo' => 'Folio', 'origen' => 'Entrega', 'destino' => 'Recibe', 'observaciones' => 'Observaciones',
         ]],
         ModificacionPresupuestal::class => ['Modificaciones presupuestales', [
             'folio_completo' => 'Folio', 'tipo' => 'Tipo', 'estado' => 'Estado', 'importe' => 'Importe',

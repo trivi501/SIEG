@@ -31,7 +31,7 @@ php artisan queue:restart
 ## Procesos
 
 - **Worker de la cola** (`php artisan queue:work`): la app no encola trabajos propios hoy, pero las notificaciones y futuros procesos lo usan; se recomienda dejarlo como servicio.
-- **Cron del scheduler (obligatorio)**: la corrida de saldos del presupuesto se ejecuta sola el **día 1 de cada mes a las 00:05** (hora de México) con `presupuesto:correr-saldos`. Requiere en el servidor la línea de cron de Laravel, como el usuario del sitio (`sudo crontab -u www-data -e`):
+- **Corrida de saldos (manual)**: ya no se programa; Control Presupuestal la corre con el botón *Correr saldos* o con `php artisan presupuesto:correr-saldos`. El cron de Laravel solo hace falta si se programan otras tareas (`sudo crontab -u www-data -e`):
 
   ```
   * * * * * cd /var/www/SIEG && php artisan schedule:run >> /dev/null 2>&1

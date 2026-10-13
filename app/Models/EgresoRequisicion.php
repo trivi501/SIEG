@@ -32,6 +32,11 @@ class EgresoRequisicion extends Model
 
     public const PAGADA = 11;
 
+    public const CANCELADA = 12;
+
+    /** Estados en los que todavía se puede cancelar (antes de la orden de compra). */
+    public const CANCELABLES = [1, 2, 3, 4, 5, 6, 7];
+
     protected $fillable = [
         'id_tb_egreso_requisicion',
         'id_cat_egreso_requisicion_estado',
@@ -66,6 +71,9 @@ class EgresoRequisicion extends Model
         'extemporanea',
         'extemporanea_user_id',
         'extemporanea_autorizada_at',
+        'cancelada_at',
+        'cancelada_user_id',
+        'motivo_cancelacion',
     ];
 
     protected function casts(): array
@@ -75,6 +83,7 @@ class EgresoRequisicion extends Model
             'suficiencia_fecha' => 'datetime',
             'extemporanea' => 'boolean',
             'extemporanea_autorizada_at' => 'datetime',
+            'cancelada_at' => 'datetime',
         ];
     }
 
@@ -82,6 +91,11 @@ class EgresoRequisicion extends Model
     public function extemporaneaPendiente(): bool
     {
         return (bool) $this->extemporanea && $this->extemporanea_autorizada_at === null;
+    }
+
+    public function canceladaPor()
+    {
+        return $this->belongsTo(User::class, 'cancelada_user_id');
     }
 
     public function extemporaneaAutorizador()

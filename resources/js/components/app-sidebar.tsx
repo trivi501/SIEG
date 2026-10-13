@@ -36,7 +36,7 @@ function getCurrentPath(): string {
 function findActiveSection(path: string): SectionKey | null {
     // "Ejercicio y control del gasto" es una entrada propia (debajo de Presupuesto), no abre el grupo Requisiciones.
     if (path.startsWith('/requisiciones/gasto')) return null;
-    if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/catalogos/proveedores') || path.startsWith('/modificaciones-presupuestales')) return 'Requisiciones';
+    if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/catalogos/proveedores') || path.startsWith('/modificaciones-presupuestales') || path.startsWith('/clc')) return 'Requisiciones';
     if (path.startsWith('/settings/users') || path.startsWith('/settings/roles') || path.startsWith('/settings/permissions') || path.startsWith('/auditoria')) return 'Administración';
     if (path.startsWith('/settings/profile') || path.startsWith('/settings/security') || path.startsWith('/settings/appearance')) return 'Ajustes';
     return null;
@@ -71,7 +71,7 @@ const mainNavItems: NavItem[] = [
         title: 'Ejercicio y control del gasto',
         href: '/requisiciones/gasto',
         icon: TrendingUp,
-        permission: 'requisiciones-index',
+        permission: 'gasto-index',
     },
     {
         title: 'Requisiciones',
@@ -79,9 +79,10 @@ const mainNavItems: NavItem[] = [
         items: [
             { title: 'Listado', href: '/requisiciones', permission: 'requisiciones-index' },
             { title: 'Nueva', href: '/requisiciones/crear', permission: 'requisiciones-create' },
-            { title: 'Recursos Materiales', href: '/recursos-materiales', permission: 'requisiciones-index' },
+            { title: 'Recursos Materiales', href: '/recursos-materiales', permission: 'recursos-materiales-index' },
             { title: 'Proveedores', href: '/catalogos/proveedores', permission: 'proveedores-index' },
             { title: 'Modificaciones Presupuestales', href: '/modificaciones-presupuestales', permission: 'modificaciones-index' },
+            { title: 'Trámite de CLC', href: '/clc', permission: 'clc-index' },
         ],
     },
 ];

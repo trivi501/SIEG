@@ -1,9 +1,28 @@
-import { Head, Link, router, usePage } from '@inertiajs/react';
-import { Check, Eye, FileText, Plus, Search, X } from 'lucide-react';
+import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
+import {
+    AlertTriangle,
+    ArrowDown,
+    Check,
+    Eye,
+    FileText,
+    Plus,
+    Search,
+    X,
+} from 'lucide-react';
 import { useState } from 'react';
+import AvisoCapturaModificaciones from '@/components/aviso-captura-modificaciones';
+import type { CapturaModificaciones } from '@/components/aviso-captura-modificaciones';
 import EstadoModificacionBadge from '@/components/estado-modificacion-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import {
     Table,
     TableBody,
@@ -29,6 +48,10 @@ interface Modificacion {
     estado: string;
     origen_descripcion: string | null;
     origen_mes: number | null;
+    origen_disponible: number | null;
+    origen_disponible_mes: number | null;
+    destino_disponible: number | null;
+    destino_disponible_mes: number | null;
     destino_descripcion: string | null;
     destino_mes: number | null;
     importe: number;
@@ -43,12 +66,308 @@ interface Paginado<T> {
     links: { url: string | null; label: string; active: boolean }[];
 }
 
+type Accion = 'autorizar' | 'rechazar';
+
+/**
+ * Lo que le falta al emisor para cubrir el importe en el periodo elegido (0 = tiene suficiencia).
+ * Sin periodo (modificaciones anteriores) se compara contra el disponible anual. El servidor
+ * vuelve a revisar ambos al aceptar.
+ */
+function faltanteEmisor(m: Modificacion): number {
+    if (!m.origen_descripcion) {
+        return 0;
+    }
+
+    const importe = Number(m.importe);
+    const disponibles = [
+        m.origen_disponible,
+        m.origen_mes ? m.origen_disponible_mes : null,
+    ].filter((d): d is number => d !== null);
+    const minimo = disponibles.length ? Math.min(...disponibles) : 0;
+
+    return Math.max(0, Math.round((importe - minimo) * 100) / 100);
+}
+
+/** Una partida del movimiento con su disponible actual y cómo queda si se acepta. */
+function LadoMovimiento({
+    titulo,
+    signo,
+    descripcion,
+    mes,
+    disponible,
+    disponibleMes,
+    importe,
+    meses,
+    mostrarDespues,
+}: {
+    titulo: string;
+    signo: 1 | -1;
+    descripcion: string;
+    mes: number | null;
+    disponible: number | null;
+    disponibleMes: number | null;
+    importe: number;
+    meses: Record<string, string>;
+    mostrarDespues: boolean;
+}) {
+    const color =
+        signo < 0
+            ? 'border-red-200 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30'
+            : 'border-green-200 bg-green-50/60 dark:border-green-900 dark:bg-green-950/30';
+    const fila = (etiqueta: string, antes: number) => {
+        const despues = antes + signo * importe;
+
+        return (
+            <div className="flex items-baseline justify-between gap-3">
+                <span className="text-muted-foreground">{etiqueta}</span>
+                <span className="font-mono">
+                    {money(antes)}
+                    {mostrarDespues && (
+                        <>
+                            <span className="mx-1 text-muted-foreground">
+                                →
+                            </span>
+                            <span
+                                className={`font-semibold ${despues < 0 ? 'text-destructive' : ''}`}
+                            >
+                                {money(despues)}
+                            </span>
+                        </>
+                    )}
+                </span>
+            </div>
+        );
+    };
+
+    return (
+        <div className={`rounded-lg border p-3 text-sm ${color}`}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold tracking-wide uppercase">
+                    {titulo}
+                </span>
+                {mes && (
+                    <span className="rounded bg-background px-1.5 py-0.5 text-[10px] font-medium uppercase">
+                        {meses[mes]}
+                    </span>
+                )}
+            </div>
+            <p className="mb-2 text-xs">{descripcion}</p>
+            <div className="space-y-1 text-xs">
+                {mes && disponibleMes !== null
+                    ? fila(`Disponible de ${meses[mes]}`, disponibleMes)
+                    : disponible !== null && fila('Disponible', disponible)}
+            </div>
+        </div>
+    );
+}
+
+function ResolverModificacion({
+    modificacion: m,
+    accion,
+    tipos,
+    meses,
+    onClose,
+}: {
+    modificacion: Modificacion | null;
+    accion: Accion;
+    tipos: Record<string, string>;
+    meses: Record<string, string>;
+    onClose: () => void;
+}) {
+    const form = useForm({ observaciones: '' });
+    const aceptar = accion === 'autorizar';
+    const importe = Number(m?.importe ?? 0);
+    const faltante = m ? faltanteEmisor(m) : 0;
+    const emisorNoAlcanza = aceptar && faltante > 0;
+
+    const cerrar = () => {
+        form.reset();
+        form.clearErrors();
+        onClose();
+    };
+
+    const enviar = (e: React.FormEvent) => {
+        e.preventDefault();
+        form.post(`/modificaciones-presupuestales/${m?.id}/${accion}`, {
+            preserveScroll: true,
+            onSuccess: () => cerrar(),
+        });
+    };
+
+    return (
+        <Dialog
+            open={m !== null}
+            onOpenChange={(abierto) => !abierto && cerrar()}
+        >
+            <DialogContent className="sm:max-w-2xl">
+                {m && (
+                    <form onSubmit={enviar} className="space-y-4">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <span
+                                    className={`flex h-8 w-8 items-center justify-center rounded-full ${aceptar ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                                >
+                                    {aceptar ? (
+                                        <Check className="h-4 w-4" />
+                                    ) : (
+                                        <X className="h-4 w-4" />
+                                    )}
+                                </span>
+                                {aceptar ? 'Aceptar' : 'Rechazar'} modificación{' '}
+                                {m.folio_completo}
+                            </DialogTitle>
+                            <DialogDescription>
+                                {aceptar
+                                    ? 'Al aceptarla, el presupuesto vigente de las partidas cambia de inmediato.'
+                                    : 'La modificación no procede; el presupuesto no cambia.'}
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="flex items-center justify-between rounded-lg bg-muted/60 px-4 py-3">
+                            <div>
+                                <p className="text-xs text-muted-foreground">
+                                    {tipos[m.tipo] ?? m.tipo}
+                                    {m.solicitante?.name &&
+                                        ` · solicitó ${m.solicitante.name}`}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    {fechaLocal(m.created_at, false)}
+                                </p>
+                            </div>
+                            <p className="font-mono text-2xl font-semibold">
+                                {money(importe)}
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            {m.origen_descripcion && (
+                                <LadoMovimiento
+                                    titulo="Emisor (disminuye)"
+                                    signo={-1}
+                                    descripcion={m.origen_descripcion}
+                                    mes={m.origen_mes}
+                                    disponible={m.origen_disponible}
+                                    disponibleMes={m.origen_disponible_mes}
+                                    importe={importe}
+                                    meses={meses}
+                                    mostrarDespues={aceptar}
+                                />
+                            )}
+                            {m.origen_descripcion && m.destino_descripcion && (
+                                <div className="flex justify-center text-muted-foreground">
+                                    <ArrowDown className="h-4 w-4" />
+                                </div>
+                            )}
+                            {m.destino_descripcion && (
+                                <LadoMovimiento
+                                    titulo="Receptor (aumenta)"
+                                    signo={1}
+                                    descripcion={m.destino_descripcion}
+                                    mes={m.destino_mes}
+                                    disponible={m.destino_disponible}
+                                    disponibleMes={m.destino_disponible_mes}
+                                    importe={importe}
+                                    meses={meses}
+                                    mostrarDespues={aceptar}
+                                />
+                            )}
+                        </div>
+
+                        {emisorNoAlcanza && (
+                            <p className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                Sin suficiencia: al emisor le faltan{' '}
+                                {money(faltante)}
+                                {m.origen_mes
+                                    ? ` en ${meses[m.origen_mes]}`
+                                    : ''}
+                                . No se puede aceptar; recházala o espera a que
+                                tenga disponible.
+                            </p>
+                        )}
+
+                        <div className="space-y-1">
+                            <label
+                                htmlFor="observaciones"
+                                className="text-sm font-medium"
+                            >
+                                {aceptar
+                                    ? 'Observaciones (opcional)'
+                                    : 'Motivo por el que no procede'}
+                                {!aceptar && (
+                                    <span className="text-destructive"> *</span>
+                                )}
+                            </label>
+                            <textarea
+                                id="observaciones"
+                                value={form.data.observaciones}
+                                onChange={(e) =>
+                                    form.setData(
+                                        'observaciones',
+                                        e.target.value,
+                                    )
+                                }
+                                rows={3}
+                                required={!aceptar}
+                                className="block w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm"
+                            />
+                            {form.errors.observaciones && (
+                                <p className="text-sm text-destructive">
+                                    {form.errors.observaciones}
+                                </p>
+                            )}
+                        </div>
+
+                        <DialogFooter>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={cerrar}
+                            >
+                                Cancelar
+                            </Button>
+                            <Button
+                                type="submit"
+                                variant={aceptar ? 'default' : 'destructive'}
+                                className={
+                                    aceptar
+                                        ? 'bg-green-700 hover:bg-green-800'
+                                        : ''
+                                }
+                                disabled={
+                                    form.processing ||
+                                    emisorNoAlcanza ||
+                                    (!aceptar &&
+                                        !form.data.observaciones.trim())
+                                }
+                            >
+                                {aceptar ? (
+                                    <Check className="mr-1 h-4 w-4" />
+                                ) : (
+                                    <X className="mr-1 h-4 w-4" />
+                                )}
+                                {form.processing
+                                    ? 'Guardando...'
+                                    : aceptar
+                                      ? 'Aceptar modificación'
+                                      : 'Rechazar modificación'}
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                )}
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 export default function Index({
     modificaciones,
     filters,
     tipos,
     meses,
+    captura,
 }: {
+    captura: CapturaModificaciones;
     modificaciones: Paginado<Modificacion>;
     filters: Record<string, string>;
     tipos: Record<string, string>;
@@ -57,44 +376,35 @@ export default function Index({
     const permisos =
         (usePage().props.userPermissions as string[] | undefined) ?? [];
     const puedeAutorizar = permisos.includes('modificaciones-autorizar');
-    const [resolviendo, setResolviendo] = useState<number | null>(null);
+    const [resolver, setResolver] = useState<{
+        modificacion: Modificacion | null;
+        accion: Accion;
+    }>({ modificacion: null, accion: 'autorizar' });
+    // Disponible actual de la partida (anual y del periodo elegido).
+    const saldo = (
+        disponible: number | null,
+        disponibleMes: number | null,
+        mes: number | null,
+    ) => {
+        const valor =
+            mes && disponibleMes !== null ? disponibleMes : disponible;
 
-    const resolver = (m: Modificacion, accion: 'autorizar' | 'rechazar') => {
-        let observaciones: string | null = '';
-
-        if (accion === 'autorizar') {
-            if (
-                !confirm(
-                    `¿Aceptar la modificación ${m.folio_completo} por ${money(m.importe)}? El presupuesto se actualiza al momento.`,
-                )
-            ) {
-                return;
-            }
-        } else {
-            observaciones = window.prompt(
-                `Motivo por el que no procede ${m.folio_completo} (obligatorio):`,
-            );
-
-            if (observaciones === null) {
-                return;
-            }
-
-            if (!observaciones.trim()) {
-                alert('El motivo del rechazo es obligatorio.');
-
-                return;
-            }
-        }
-
-        setResolviendo(m.id);
-        router.post(
-            `/modificaciones-presupuestales/${m.id}/${accion}`,
-            { observaciones },
-            {
-                preserveScroll: true,
-                onError: (errores) => alert(Object.values(errores).join('\n')),
-                onFinish: () => setResolviendo(null),
-            },
+        return valor === null ? null : (
+            <div className="pl-3 text-[11px] text-muted-foreground">
+                Disponible
+                {mes && disponibleMes !== null && (
+                    <>
+                        {' de '}
+                        <span className="capitalize">{meses[mes]}</span>
+                    </>
+                )}
+                :{' '}
+                <span
+                    className={`font-mono ${valor < 0 ? 'text-destructive' : 'text-foreground'}`}
+                >
+                    {money(valor)}
+                </span>
+            </div>
         );
     };
 
@@ -144,15 +454,22 @@ export default function Index({
                             Historial de traspasos, reducciones y ampliaciones.
                         </p>
                     </div>
-                    {permisos.includes('modificaciones-create') && (
-                        <Button asChild>
-                            <Link href="/modificaciones-presupuestales/crear">
-                                <Plus className="mr-2 h-4 w-4" /> Nueva
-                                modificación
-                            </Link>
-                        </Button>
-                    )}
+                    {permisos.includes('modificaciones-create') &&
+                        captura.abierta && (
+                            <Button asChild>
+                                <Link href="/modificaciones-presupuestales/crear">
+                                    <Plus className="mr-2 h-4 w-4" /> Nueva
+                                    modificación
+                                </Link>
+                            </Button>
+                        )}
                 </div>
+
+                {permisos.includes('modificaciones-create') && (
+                    <div className="mb-4">
+                        <AvisoCapturaModificaciones captura={captura} />
+                    </div>
+                )}
 
                 <Card>
                     <CardHeader>
@@ -297,6 +614,12 @@ export default function Index({
                                                     {periodo(m.origen_mes)}
                                                 </div>
                                             )}
+                                            {m.origen_descripcion &&
+                                                saldo(
+                                                    m.origen_disponible,
+                                                    m.origen_disponible_mes,
+                                                    m.origen_mes,
+                                                )}
                                             {m.destino_descripcion && (
                                                 <div
                                                     className="truncate"
@@ -311,9 +634,24 @@ export default function Index({
                                                     {periodo(m.destino_mes)}
                                                 </div>
                                             )}
+                                            {m.destino_descripcion &&
+                                                saldo(
+                                                    m.destino_disponible,
+                                                    m.destino_disponible_mes,
+                                                    m.destino_mes,
+                                                )}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {money(m.importe)}
+                                            {m.estado === 'pendiente' &&
+                                                faltanteEmisor(m) > 0 && (
+                                                    <div className="text-[11px] font-medium text-destructive">
+                                                        Sin suficiencia: faltan{' '}
+                                                        {money(
+                                                            faltanteEmisor(m),
+                                                        )}
+                                                    </div>
+                                                )}
                                         </TableCell>
                                         <TableCell>
                                             <EstadoModificacionBadge
@@ -336,13 +674,24 @@ export default function Index({
                                                                 size="sm"
                                                                 className="bg-green-700 hover:bg-green-800"
                                                                 disabled={
-                                                                    resolviendo ===
-                                                                    m.id
+                                                                    faltanteEmisor(
+                                                                        m,
+                                                                    ) > 0
+                                                                }
+                                                                title={
+                                                                    faltanteEmisor(
+                                                                        m,
+                                                                    ) > 0
+                                                                        ? `Sin suficiencia: al emisor le faltan ${money(faltanteEmisor(m))}`
+                                                                        : ''
                                                                 }
                                                                 onClick={() =>
-                                                                    resolver(
-                                                                        m,
-                                                                        'autorizar',
+                                                                    setResolver(
+                                                                        {
+                                                                            modificacion:
+                                                                                m,
+                                                                            accion: 'autorizar',
+                                                                        },
                                                                     )
                                                                 }
                                                             >
@@ -352,14 +701,13 @@ export default function Index({
                                                             <Button
                                                                 size="sm"
                                                                 variant="destructive"
-                                                                disabled={
-                                                                    resolviendo ===
-                                                                    m.id
-                                                                }
                                                                 onClick={() =>
-                                                                    resolver(
-                                                                        m,
-                                                                        'rechazar',
+                                                                    setResolver(
+                                                                        {
+                                                                            modificacion:
+                                                                                m,
+                                                                            accion: 'rechazar',
+                                                                        },
                                                                     )
                                                                 }
                                                             >
@@ -428,6 +776,16 @@ export default function Index({
                     </CardContent>
                 </Card>
             </div>
+
+            <ResolverModificacion
+                modificacion={resolver.modificacion}
+                accion={resolver.accion}
+                tipos={tipos}
+                meses={meses}
+                onClose={() =>
+                    setResolver((r) => ({ ...r, modificacion: null }))
+                }
+            />
         </>
     );
 }

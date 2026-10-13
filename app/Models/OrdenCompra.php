@@ -16,7 +16,8 @@ class OrdenCompra extends Model
         'observaciones', 'user_id', 'xml_path', 'xml_uuid', 'xml_rfc_emisor', 'xml_nombre_emisor',
         'xml_serie', 'xml_folio', 'xml_fecha', 'xml_subtotal', 'xml_total', 'xml_cargado_at', 'xml_user_id',
         'pago_fecha', 'pago_forma', 'pago_referencia', 'pago_user_id', 'pago_registrado_at',
-        'clc_folio', 'clc_año', 'clc_folio_completo', 'clc_fecha', 'clc_user_id', 'clc_generada_at',
+        'transferencia_folio', 'transferencia_año', 'transferencia_numero',
+        'clc_folio', 'clc_año', 'clc_folio_completo', 'clc_fecha', 'clc_user_id', 'clc_generada_at', 'clc_estado', 'clc_relacion_id',
     ];
 
     public const FORMAS_PAGO = ['transferencia' => 'Transferencia', 'cheque' => 'Cheque'];
@@ -47,6 +48,16 @@ class OrdenCompra extends Model
     public function proveedor()
     {
         return $this->belongsTo(Proveedor::class);
+    }
+
+    public function movimientosClc()
+    {
+        return $this->hasMany(ClcMovimiento::class)->orderBy('id');
+    }
+
+    public function relacionClc()
+    {
+        return $this->belongsTo(ClcRelacion::class, 'clc_relacion_id');
     }
 
     public function usuario()

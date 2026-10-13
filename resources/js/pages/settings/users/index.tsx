@@ -1,14 +1,11 @@
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus, Users as UsersIcon, Pencil, Trash2, Shield } from 'lucide-react';
+import { useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
     TableBody,
@@ -24,6 +21,8 @@ type User = {
     email: string;
     email_verified_at: string | null;
     unidad: string | null;
+    cargo: string | null;
+    regidor: string | null;
     roles: string[];
     created_at: string;
 };
@@ -39,10 +38,10 @@ interface PaginatedData<T> {
 }
 
 export default function Index({ users }: { users: PaginatedData<User> }) {
+    const [borrar, setBorrar] = useState<User | null>(null);
+
     const handleDelete = (user: User) => {
-        if (confirm(`Are you sure you want to delete user "${user.name}"?`)) {
-            router.delete(`/settings/users/${user.id}`);
-        }
+        setBorrar(user);
     };
 
     return (
@@ -74,17 +73,22 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                 <TableRow>
                                     <TableHead>Name</TableHead>
                                     <TableHead>Email</TableHead>
-                                    <TableHead>Secretaría o dirección</TableHead>
+                                    <TableHead>Pertenece a</TableHead>
                                     <TableHead>Verified</TableHead>
                                     <TableHead>Roles</TableHead>
                                     <TableHead>Created</TableHead>
-                                    <TableHead className="w-[100px]">Actions</TableHead>
+                                    <TableHead className="w-[100px]">
+                                        Actions
+                                    </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {users.data.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={7} className="text-center text-muted-foreground">
+                                        <TableCell
+                                            colSpan={7}
+                                            className="text-center text-muted-foreground"
+                                        >
                                             No users found.
                                         </TableCell>
                                     </TableRow>
@@ -94,43 +98,91 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                         <TableCell className="font-medium">
                                             <div className="flex items-center gap-2">
                                                 <UsersIcon className="h-4 w-4 text-muted-foreground" />
-                                                {user.name}
+                                                <div>
+                                                    {user.name}
+                                                    {user.cargo && (
+                                                        <div className="text-xs font-normal text-muted-foreground">
+                                                            {user.cargo}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </TableCell>
                                         <TableCell>{user.email}</TableCell>
-                                        <TableCell>
-                                            {user.unidad || <span className="text-muted-foreground italic">—</span>}
+                                        <TableCell className="text-sm">
+                                            {user.regidor ? (
+                                                <>
+                                                    <Badge variant="secondary">
+                                                        Regidor
+                                                    </Badge>{' '}
+                                                    {user.regidor}
+                                                </>
+                                            ) : user.unidad ? (
+                                                <>
+                                                    <Badge variant="outline">
+                                                        Secretaría
+                                                    </Badge>{' '}
+                                                    {user.unidad}
+                                                </>
+                                            ) : (
+                                                <span className="text-muted-foreground italic">
+                                                    —
+                                                </span>
+                                            )}
                                         </TableCell>
                                         <TableCell>
                                             {user.email_verified_at ? (
-                                                <Badge variant="secondary">{user.email_verified_at}</Badge>
+                                                <Badge variant="secondary">
+                                                    {user.email_verified_at}
+                                                </Badge>
                                             ) : (
-                                                <Badge variant="outline">Unverified</Badge>
+                                                <Badge variant="outline">
+                                                    Unverified
+                                                </Badge>
                                             )}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex flex-wrap gap-1">
                                                 {user.roles.length > 0 ? (
                                                     user.roles.map((role) => (
-                                                        <Badge key={role} variant="secondary">
+                                                        <Badge
+                                                            key={role}
+                                                            variant="secondary"
+                                                        >
                                                             <Shield className="mr-1 h-3 w-3" />
                                                             {role}
                                                         </Badge>
                                                     ))
                                                 ) : (
-                                                    <span className="text-muted-foreground italic">No roles</span>
+                                                    <span className="text-muted-foreground italic">
+                                                        No roles
+                                                    </span>
                                                 )}
                                             </div>
                                         </TableCell>
-                                        <TableCell className="text-muted-foreground">{user.created_at}</TableCell>
+                                        <TableCell className="text-muted-foreground">
+                                            {user.created_at}
+                                        </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">
-                                                <Button variant="ghost" size="icon" asChild>
-                                                    <Link href={`/settings/users/${user.id}/edit`}>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    asChild
+                                                >
+                                                    <Link
+                                                        href={`/settings/users/${user.id}/edit`}
+                                                    >
                                                         <Pencil className="h-4 w-4" />
                                                     </Link>
                                                 </Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(user)}>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() =>
+                                                        handleDelete(user)
+                                                    }
+                                                >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </div>
@@ -149,7 +201,11 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                         preserveScroll
                                         className={`inline-flex items-center rounded px-3 py-1 text-sm ${link.active ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`}
                                     >
-                                        <span dangerouslySetInnerHTML={{ __html: link.label }} />
+                                        <span
+                                            dangerouslySetInnerHTML={{
+                                                __html: link.label,
+                                            }}
+                                        />
                                     </Link>
                                 ))}
                             </div>
@@ -157,6 +213,26 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                     </CardContent>
                 </Card>
             </div>
+            <ConfirmarAccion
+                abierto={borrar !== null}
+                onCerrar={() => setBorrar(null)}
+                titulo="Eliminar usuario"
+                descripcion="El usuario ya no podrá entrar al sistema. Queda registrado en la bitácora de auditoría."
+                tono="peligro"
+                encabezado={{ titulo: borrar?.name, subtitulo: borrar?.email }}
+                datos={[
+                    { etiqueta: 'Unidad', valor: borrar?.unidad ?? '—' },
+                    {
+                        etiqueta: 'Roles',
+                        valor: borrar?.roles.join(', ') || 'Sin rol',
+                    },
+                ]}
+                textoConfirmar="Eliminar usuario"
+                textoProcesando="Eliminando..."
+                onConfirmar={(_, op) =>
+                    router.delete(`/settings/users/${borrar?.id}`, op)
+                }
+            />
         </>
     );
 }

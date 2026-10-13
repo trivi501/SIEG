@@ -6,9 +6,11 @@ use App\Models\EgresoRequisicion;
 use App\Models\EgresoRequisicionBitacora;
 use App\Models\OrdenCompra;
 use App\Models\Proveedor;
+use App\Services\TramiteClc;
 use Barryvdh\DomPDF\Facade\Pdf;
 use DOMDocument;
 use DOMXPath;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -61,6 +63,38 @@ class OrdenCompraController extends Controller
         return back()->with('success', 'Orden de compra generada.');
     }
 
+    /**
+     * Recursos Materiales y Control Presupuestal corrigen la fecha de la orden de compra: debe ser del
+     * mismo año del folio, no futura y no posterior al pago registrado.
+     */
+    public function cambiarFecha(Request $request, OrdenCompra $ordenCompra)
+    {
+        $validated = $request->validate([
+            'fecha' => ['required', 'date', 'before_or_equal:today', function ($attr, $valor, $fallo) use ($ordenCompra) {
+                if ((int) date('Y', strtotime($valor)) !== (int) $ordenCompra->año) {
+                    $fallo("La fecha debe ser del {$ordenCompra->año}, como el folio {$ordenCompra->folio_completo}.");
+                }
+                if ($ordenCompra->pago_fecha && $valor > $ordenCompra->pago_fecha->toDateString()) {
+                    $fallo('La fecha no puede ser posterior al pago registrado ('.$ordenCompra->pago_fecha->toDateString().').');
+                }
+            }],
+        ], ['fecha.before_or_equal' => 'La fecha no puede ser futura.']);
+
+        $anterior = $ordenCompra->fecha?->toDateString();
+        if ($anterior === $validated['fecha']) {
+            return back();
+        }
+
+        DB::transaction(function () use ($ordenCompra, $validated, $anterior) {
+            $ordenCompra->update(['fecha' => $validated['fecha']]);
+            $requisicion = $ordenCompra->requisicion;
+            $this->bitacora($requisicion, $requisicion->id_cat_egreso_requisicion_estado,
+                "Fecha de la orden {$ordenCompra->folio_completo} cambiada del {$anterior} al {$validated['fecha']} por ".auth()->user()->name.'.');
+        });
+
+        return back()->with('success', 'Fecha de la orden de compra actualizada.');
+    }
+
     public function pdf(OrdenCompra $ordenCompra)
     {
         $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');
@@ -95,8 +129,8 @@ class OrdenCompraController extends Controller
         }
         if (! $cfdi['uuid']) {
             $errores[] = 'El XML no trae timbre fiscal (UUID); no es un CFDI timbrado.';
-        } elseif (OrdenCompra::where('xml_uuid', $cfdi['uuid'])->exists()) {
-            $errores[] = "La factura {$cfdi['uuid']} ya se cargó en otra orden de compra.";
+        } else {
+            $errores = [...$errores, ...$this->duplicidades($ordenCompra, $cfdi)];
         }
 
         if ($errores) {
@@ -106,6 +140,54 @@ class OrdenCompraController extends Controller
         $ruta = "ordenes-compra/{$ordenCompra->año}/{$ordenCompra->folio_completo}_{$cfdi['uuid']}.xml";
         Storage::disk('local')->put($ruta, $contenido);
 
+        try {
+            $this->guardarFactura($ordenCompra, $cfdi, $ruta);
+        } catch (UniqueConstraintViolationException) {
+            // Otra persona cargó el mismo UUID al mismo tiempo: el índice único lo detiene.
+            Storage::disk('local')->delete($ruta);
+            throw ValidationException::withMessages(['xml' => implode(' ', $this->duplicidades($ordenCompra, $cfdi))
+                ?: "La factura {$cfdi['uuid']} ya se cargó en otra orden de compra."]);
+        }
+
+        return back()->with('success', 'Factura cargada: el gasto pasa de comprometido a devengado.');
+    }
+
+    /**
+     * Evita cargar dos veces la misma factura: por folio fiscal (UUID) y por serie + folio del mismo
+     * emisor (la misma factura cancelada y vuelta a timbrar trae otro UUID).
+     *
+     * @return array<int, string>
+     */
+    private function duplicidades(OrdenCompra $ordenCompra, array $cfdi): array
+    {
+        $donde = fn (OrdenCompra $o) => "la orden {$o->folio_completo}".($o->requisicion ? " (requisición {$o->requisicion->folio_completo})" : '');
+        $errores = [];
+
+        $mismoUuid = OrdenCompra::with('requisicion:id_tb_egreso_requisicion,folio_completo')
+            ->where('xml_uuid', $cfdi['uuid'])->first();
+        if ($mismoUuid) {
+            $errores[] = "La factura {$cfdi['uuid']} ya está cargada en {$donde($mismoUuid)}.";
+        }
+
+        if ($cfdi['folio'] && $cfdi['rfc_emisor']) {
+            $mismoFolio = OrdenCompra::with('requisicion:id_tb_egreso_requisicion,folio_completo')
+                ->whereKeyNot($ordenCompra->getKey())
+                ->when($mismoUuid, fn ($q) => $q->whereKeyNot($mismoUuid->getKey()))
+                ->whereRaw('UPPER(xml_rfc_emisor) = ?', [mb_strtoupper($cfdi['rfc_emisor'])])
+                ->where('xml_folio', $cfdi['folio'])
+                ->where(fn ($q) => $cfdi['serie'] ? $q->where('xml_serie', $cfdi['serie']) : $q->whereNull('xml_serie')->orWhere('xml_serie', ''))
+                ->first();
+            if ($mismoFolio) {
+                $factura = trim(($cfdi['serie'] ? "serie {$cfdi['serie']} " : '')."folio {$cfdi['folio']}");
+                $errores[] = "La factura {$factura} de {$cfdi['rfc_emisor']} ya está cargada en {$donde($mismoFolio)} (con el folio fiscal {$mismoFolio->xml_uuid}). Si el proveedor la volvió a timbrar, se debe cancelar la anterior.";
+            }
+        }
+
+        return $errores;
+    }
+
+    private function guardarFactura(OrdenCompra $ordenCompra, array $cfdi, string $ruta): void
+    {
         DB::transaction(function () use ($ordenCompra, $cfdi, $ruta) {
             $ordenCompra->update([
                 'xml_path' => $ruta,
@@ -123,44 +205,22 @@ class OrdenCompraController extends Controller
 
             $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::CON_FACTURA, "Factura {$cfdi['uuid']} por $".number_format($cfdi['total'], 2)." cargada a la orden {$ordenCompra->folio_completo}.");
         });
-
-        return back()->with('success', 'Factura cargada: el gasto pasa de comprometido a devengado.');
     }
 
     /**
-     * Registra el pago de la orden (momento contable "pagado"). Solo con factura cargada
-     * (devengado), con la CLC generada por el área, y una sola vez.
+     * Registra el pago de una orden (momento contable "pagado"). Es el último paso del trámite de la
+     * CLC: solo cuando Egresos ya la recibió (TramiteClc, acción "pagar").
      */
-    public function registrarPago(Request $request, OrdenCompra $ordenCompra)
+    public function registrarPago(Request $request, OrdenCompra $ordenCompra, TramiteClc $tramite)
     {
-        if (! $ordenCompra->xml_uuid) {
-            return back()->with('error', 'Primero hay que cargar la factura (XML) de la orden de compra.');
-        }
-        if (! $ordenCompra->clc_folio_completo) {
-            return back()->with('error', 'Primero el área tiene que generar la CLC de la orden de compra.');
-        }
         if ($ordenCompra->pago_fecha) {
             return back()->with('error', 'Esta orden de compra ya tiene su pago registrado.');
         }
+        if ($ordenCompra->clc_estado !== 'recibida_egresos') {
+            return back()->with('error', 'El pago se registra cuando Egresos ya recibió la CLC (Trámite de CLC). Hoy está: '.TramiteClc::descripcion($ordenCompra->clc_estado).'.');
+        }
 
-        $validated = $request->validate([
-            'pago_fecha' => ['required', 'date', 'after_or_equal:'.$ordenCompra->fecha->toDateString(), 'before_or_equal:today'],
-            'pago_forma' => ['required', 'in:'.implode(',', array_keys(OrdenCompra::FORMAS_PAGO))],
-            'pago_referencia' => 'required|string|max:100',
-        ], [
-            'pago_fecha.after_or_equal' => 'La fecha de pago no puede ser anterior a la orden de compra.',
-            'pago_fecha.before_or_equal' => 'La fecha de pago no puede ser futura.',
-        ], [
-            'pago_fecha' => 'fecha de pago', 'pago_forma' => 'forma de pago', 'pago_referencia' => 'referencia',
-        ]);
-
-        DB::transaction(function () use ($ordenCompra, $validated) {
-            $ordenCompra->update([...$validated, 'pago_user_id' => auth()->id(), 'pago_registrado_at' => now()]);
-
-            $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::PAGADA, sprintf('Pago de la orden %s registrado: %s %s del %s por $%s.',
-                $ordenCompra->folio_completo, OrdenCompra::FORMAS_PAGO[$validated['pago_forma']], $validated['pago_referencia'],
-                $validated['pago_fecha'], number_format($ordenCompra->importe, 2)));
-        });
+        $tramite->ejecutar('pagar', [$ordenCompra->id], $request->user(), $request->only('pago_fecha', 'pago_forma', 'pago_referencia'));
 
         return back()->with('success', 'Pago registrado.');
     }
@@ -195,6 +255,7 @@ class OrdenCompraController extends Controller
             ]);
 
             $this->bitacora($requisicion, EgresoRequisicion::CLC_GENERADA, "CLC {$ordenCompra->clc_folio_completo} generada por $".number_format($ordenCompra->importe, 2)." a favor de {$ordenCompra->proveedor?->nombre}.");
+            app(TramiteClc::class)->generada($ordenCompra, auth()->user());
         });
 
         return back()->with('success', "CLC {$ordenCompra->clc_folio_completo} generada.");
@@ -207,8 +268,15 @@ class OrdenCompraController extends Controller
 
         $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');
 
-        return Pdf::loadView('ordenes-compra.clc', ['orden' => $ordenCompra])
-            ->stream("{$ordenCompra->clc_folio_completo}.pdf");
+        $pdf = Pdf::loadView('ordenes-compra.clc', ['orden' => $ordenCompra])->setPaper('letter', 'landscape');
+
+        // "Página N de M" en el pie (dompdf no conoce el total de páginas desde el CSS).
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $canvas->page_text($canvas->get_width() - 100, $canvas->get_height() - 28, 'Página {PAGE_NUM} de {PAGE_COUNT}',
+            $pdf->getDomPDF()->getFontMetrics()->getFont('Helvetica'), 7);
+
+        return $pdf->stream("{$ordenCompra->clc_folio_completo}.pdf");
     }
 
     /** La CLC es del área que hizo la requisición (Admin y Recursos Materiales ven todas). */

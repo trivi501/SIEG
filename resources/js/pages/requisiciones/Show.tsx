@@ -1,6 +1,16 @@
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
-import { ArrowLeft, CheckCircle2, FileText, Send, XCircle } from 'lucide-react';
+import {
+    ArrowLeft,
+    CheckCircle2,
+    FileText,
+    Pencil,
+    Send,
+    XCircle,
+} from 'lucide-react';
 import { useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
+import type { OpcionesAccion, TonoAccion } from '@/components/confirmar-accion';
+import EditarFecha from '@/components/editar-fecha';
 import SearchableSelect from '@/components/searchable-select';
 import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
@@ -145,12 +155,28 @@ function TablaValidacion({
     );
 }
 
+type Accion =
+    | 'enviar'
+    | 'aprobar'
+    | 'rechazar'
+    | 'recursos'
+    | 'recibido'
+    | 'suficiencia'
+    | 'extemporanea'
+    | 'clc'
+    | 'cancelar';
+
 export default function Show({
     requisicion,
     isAdmin,
     nombresPresupuesto,
     validacion,
     puedeEditarse,
+    periodoCaptura,
+    puedeCambiarFecha,
+    puedeCambiarFechaOrden,
+    puedeCancelar,
+    estadosClc,
     proveedores,
     modificaciones,
 }: {
@@ -159,6 +185,11 @@ export default function Show({
     nombresPresupuesto: NombresPresupuesto;
     validacion: Validacion;
     puedeEditarse: boolean;
+    periodoCaptura: [number, number];
+    puedeCambiarFecha: boolean;
+    puedeCambiarFechaOrden: boolean;
+    puedeCancelar: boolean;
+    estadosClc: Record<string, string>;
     proveedores: { id: number; nombre: string; rfc: string | null }[];
     modificaciones: Modificacion[];
 }) {
@@ -178,10 +209,12 @@ export default function Show({
     const esComprometida = estado === 7;
     const extemporaneaPendiente =
         !!requisicion.extemporanea && !requisicion.extemporanea_autorizada_at;
-    const [showEnviar, setShowEnviar] = useState(false);
+    const [accion, setAccion] = useState<Accion | null>(null);
     const [showResultado, setShowResultado] = useState(false);
     const [showOrden, setShowOrden] = useState(false);
-    const [validando, setValidando] = useState(false);
+    const [editarFecha, setEditarFecha] = useState<
+        'requisicion' | 'orden' | null
+    >(null);
 
     const ordenForm = useForm({
         proveedor_id: '',
@@ -203,21 +236,6 @@ export default function Show({
             {},
             { preserveScroll: true, ...options },
         );
-
-    const validarSuficiencia = () => {
-        setValidando(true);
-        post('suficiencia', {
-            onSuccess: (p: any) => {
-                if (
-                    p.props.requisicion?.suficiencia !== null &&
-                    p.props.requisicion?.suficiencia !== undefined
-                ) {
-                    setShowResultado(true);
-                }
-            },
-            onFinish: () => setValidando(false),
-        });
-    };
 
     const generarOrden = (e: React.FormEvent) => {
         e.preventDefault();
@@ -268,28 +286,186 @@ export default function Show({
         });
     };
 
-    const generarClc = () => {
-        if (
-            !confirm(
-                `¿Generar la CLC de la orden ${orden?.folio_completo} por ${money(orden?.importe ?? 0)}?`,
-            )
-        ) {
-            return;
-        }
-
-        router.post(
-            `/ordenes-compra/${orden?.id}/clc`,
-            {},
-            { preserveScroll: true },
-        );
-    };
-
     const registrarPago = (e: React.FormEvent) => {
         e.preventDefault();
         pagoForm.post(`/ordenes-compra/${orden?.id}/pago`, {
             preserveScroll: true,
         });
     };
+
+    // Resumen de la requisición que se muestra en los modales de acción.
+    const unidadTexto = requisicion.cat_egreso_unidad_administrativa
+        ? `${requisicion.cat_egreso_unidad_administrativa.clave} ${requisicion.cat_egreso_unidad_administrativa.nombre}`
+        : '—';
+    const resumen = {
+        encabezado: {
+            titulo: requisicion.folio_completo,
+            subtitulo: unidadTexto,
+        },
+        datos: [
+            {
+                etiqueta: 'Total',
+                valor:
+                    parseFloat(requisicion.total) > 0
+                        ? money(requisicion.total)
+                        : 'Sin cotizar',
+            },
+            { etiqueta: 'Conceptos', valor: detalles.length },
+            {
+                etiqueta: 'Concepto',
+                valor: requisicion.observaciones || '—',
+                ancho: true,
+            },
+        ],
+    };
+    const estadoActual =
+        requisicion.cat_egreso_requisicion_estado?.descripcion ?? '—';
+
+    const acciones: Record<
+        Accion,
+        {
+            titulo: string;
+            descripcion: string;
+            tono: TonoAccion;
+            textoConfirmar: string;
+            a?: string;
+            motivo?: {
+                etiqueta: string;
+                requerido?: boolean;
+                minimo?: number;
+                placeholder?: string;
+            };
+            resumen?: typeof resumen;
+            ejecutar: (motivo: string, op: OpcionesAccion) => void;
+        }
+    > = {
+        enviar: {
+            titulo: 'Enviar a revisión',
+            descripcion:
+                'Ya no se podrá modificar. La revisará el área de Presupuesto.',
+            tono: 'info',
+            textoConfirmar: 'Enviar a revisión',
+            a: 'En revisión',
+            ejecutar: (_, op) => post('enviar', op),
+        },
+        aprobar: {
+            titulo: 'Validar requisición',
+            descripcion:
+                'La requisición es válida: queda aprobada para imprimir el formato y enviarla a Recursos Materiales.',
+            tono: 'exito',
+            textoConfirmar: 'Válida',
+            a: 'Aprobada',
+            ejecutar: (_, op) => post('aprobar', op),
+        },
+        rechazar: {
+            titulo: 'Requisición no válida',
+            descripcion:
+                'Regresa al área para que la corrija y la vuelva a enviar. El motivo queda en la bitácora.',
+            tono: 'peligro',
+            textoConfirmar: 'No válida',
+            a: 'Rechazada',
+            motivo: {
+                etiqueta: 'Motivo del rechazo',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Qué debe corregir el área…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(`/requisiciones/${id}/rechazar`, { motivo }, op),
+        },
+        recursos: {
+            titulo: 'Enviar a Recursos Materiales',
+            descripcion:
+                'Recursos Materiales la recibe para cotizarla y validar la suficiencia presupuestal.',
+            tono: 'info',
+            textoConfirmar: 'Enviar a Recursos Materiales',
+            a: 'En Recursos Materiales',
+            ejecutar: (_, op) => post('recursos-materiales', op),
+        },
+        recibido: {
+            titulo: 'Recibir e iniciar cotización',
+            descripcion:
+                'Recursos Materiales recibe la requisición y comienza a capturar los precios.',
+            tono: 'info',
+            textoConfirmar: 'Recibido, iniciar cotización',
+            a: 'En cotización',
+            ejecutar: (_, op) => post('recibido', op),
+        },
+        suficiencia: {
+            titulo: 'Validar suficiencia presupuestal',
+            descripcion:
+                'Se compara lo cotizado contra el disponible de cada partida. Si alcanza, el monto queda comprometido.',
+            tono: 'aviso',
+            textoConfirmar: 'Validar suficiencia',
+            ejecutar: (_, op) =>
+                post('suficiencia', {
+                    ...op,
+                    onSuccess: (p: any) => {
+                        op.onSuccess?.(p);
+
+                        if (
+                            p.props.requisicion?.suficiencia !== null &&
+                            p.props.requisicion?.suficiencia !== undefined
+                        ) {
+                            setShowResultado(true);
+                        }
+                    },
+                }),
+        },
+        extemporanea: {
+            titulo: 'Autorizar requisición extemporánea',
+            descripcion: `Se capturó fuera del periodo ordinario de captura (del ${periodoCaptura[0]} al ${periodoCaptura[1]} de cada mes). Quedará registrado quién la autorizó y cuándo, y se envía sola a revisión.`,
+            tono: 'aviso',
+            textoConfirmar: 'Autorizar y enviar a revisión',
+            a: 'En revisión',
+            ejecutar: (_, op) => post('autorizar-extemporanea', op),
+        },
+        cancelar: {
+            titulo: 'Cancelar requisición',
+            descripcion:
+                'Ya no seguirá su trámite y deja de contar en el presupuesto (en trámite o comprometido). Esta acción no se puede deshacer.',
+            tono: 'peligro',
+            textoConfirmar: 'Cancelar requisición',
+            a: 'Cancelada',
+            motivo: {
+                etiqueta: 'Motivo de la cancelación',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Por qué se cancela…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(`/requisiciones/${id}/cancelar`, { motivo }, op),
+        },
+        clc: {
+            titulo: 'Generar CLC',
+            descripcion:
+                'Se genera la cuenta por liquidar certificada para solicitar el pago al proveedor. Solo se genera una vez.',
+            tono: 'exito',
+            textoConfirmar: 'Generar CLC',
+            a: 'CLC generada',
+            resumen: {
+                encabezado: {
+                    titulo: orden?.folio_completo ?? '—',
+                    subtitulo: `Requisición ${requisicion.folio_completo}`,
+                },
+                datos: [
+                    {
+                        etiqueta: 'Proveedor',
+                        valor: orden?.proveedor?.nombre ?? '—',
+                    },
+                    { etiqueta: 'Importe', valor: money(orden?.importe ?? 0) },
+                    {
+                        etiqueta: 'Factura (UUID)',
+                        valor: orden?.xml_uuid ?? '—',
+                        ancho: true,
+                    },
+                ],
+            },
+            ejecutar: (_, op) =>
+                router.post(`/ordenes-compra/${orden?.id}/clc`, {}, op),
+        },
+    };
+    const config = accion ? acciones[accion] : null;
 
     // De Recursos Materiales en adelante (cotización, comprometida, orden de compra, factura, CLC, pagada).
     const precios = estado >= 5;
@@ -311,6 +487,22 @@ export default function Show({
                 </div>
 
                 <div className="grid max-w-5xl gap-6">
+                    {requisicion.cancelada_at && (
+                        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                            <p className="flex items-center gap-2 font-semibold">
+                                <XCircle className="h-4 w-4" /> Requisición
+                                cancelada
+                            </p>
+                            <p className="mt-1">
+                                Por {requisicion.cancelada_por?.name ?? '—'} el{' '}
+                                {fechaLocal(requisicion.cancelada_at)}.
+                            </p>
+                            <p className="mt-1">
+                                <span className="font-medium">Motivo:</span>{' '}
+                                {requisicion.motivo_cancelacion}
+                            </p>
+                        </div>
+                    )}
                     {!!requisicion.extemporanea && (
                         <div
                             className={`flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm ${extemporaneaPendiente ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-green-200 bg-green-50 text-green-900'}`}
@@ -318,10 +510,10 @@ export default function Show({
                             {extemporaneaPendiente ? (
                                 <span>
                                     <strong>Requisición extemporánea:</strong>{' '}
-                                    se capturó fuera del periodo de captura. No
-                                    se puede enviar a revisión hasta que la
-                                    autorice la Subdirección Administrativa
-                                    (Adquisiciones).
+                                    se capturó fuera del periodo de captura. La
+                                    Subdirección Administrativa (Adquisiciones)
+                                    debe autorizarla; al autorizarla se envía
+                                    sola a revisión.
                                 </span>
                             ) : (
                                 <span>
@@ -340,9 +532,7 @@ export default function Show({
                                     <Button
                                         size="sm"
                                         onClick={() =>
-                                            confirm(
-                                                `¿Autorizar la requisición extemporánea ${requisicion.folio_completo}?`,
-                                            ) && post('autorizar-extemporanea')
+                                            setAccion('extemporanea')
                                         }
                                     >
                                         <CheckCircle2 className="mr-1 h-4 w-4" />
@@ -379,7 +569,19 @@ export default function Show({
                                           0,
                                           10,
                                       )
-                                    : '—'}
+                                    : '—'}{' '}
+                                {puedeCambiarFecha && (
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setEditarFecha('requisicion')
+                                        }
+                                        className="ml-1 inline-flex items-center gap-1 rounded px-1 text-xs text-primary hover:underline"
+                                        title="Cambiar la fecha"
+                                    >
+                                        <Pencil className="h-3 w-3" /> Cambiar
+                                    </button>
+                                )}
                             </div>
                             <div>
                                 <span className="font-semibold">Registro:</span>{' '}
@@ -594,7 +796,20 @@ export default function Show({
                                         <span className="font-semibold">
                                             Fecha:
                                         </span>{' '}
-                                        {String(orden.fecha).slice(0, 10)}
+                                        {String(orden.fecha).slice(0, 10)}{' '}
+                                        {puedeCambiarFechaOrden && (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    setEditarFecha('orden')
+                                                }
+                                                className="ml-1 inline-flex items-center gap-1 rounded px-1 text-xs text-primary hover:underline"
+                                                title="Cambiar la fecha"
+                                            >
+                                                <Pencil className="h-3 w-3" />{' '}
+                                                Cambiar
+                                            </button>
+                                        )}
                                     </div>
                                     <div>
                                         <span className="font-semibold">
@@ -645,7 +860,14 @@ export default function Show({
                                                 {orden.clc_folio_completo}{' '}
                                                 <span className="text-muted-foreground">
                                                     ({orden.clc_fecha})
-                                                </span>
+                                                </span>{' '}
+                                                {orden.clc_estado && (
+                                                    <Badge variant="secondary">
+                                                        {estadosClc[
+                                                            orden.clc_estado
+                                                        ] ?? orden.clc_estado}
+                                                    </Badge>
+                                                )}
                                             </>
                                         ) : (
                                             <Badge variant="secondary">
@@ -699,7 +921,7 @@ export default function Show({
                                         puede('requisiciones-clc') && (
                                             <Button
                                                 size="sm"
-                                                onClick={generarClc}
+                                                onClick={() => setAccion('clc')}
                                             >
                                                 <FileText className="mr-1 h-4 w-4" />{' '}
                                                 Generar CLC
@@ -756,6 +978,11 @@ export default function Show({
                                             {orden.pago_forma === 'cheque'
                                                 ? 'Cheque'
                                                 : 'Transferencia'}{' '}
+                                            {orden.transferencia_numero && (
+                                                <strong>
+                                                    {orden.transferencia_numero}
+                                                </strong>
+                                            )}{' '}
                                             {orden.pago_referencia}
                                         </div>
                                     </div>
@@ -772,6 +999,67 @@ export default function Show({
 
                                 {orden.clc_folio_completo &&
                                     !orden.pago_fecha &&
+                                    orden.clc_estado !== 'recibida_egresos' && (
+                                        <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+                                            La CLC va en trámite (
+                                            {estadosClc[orden.clc_estado] ??
+                                                '—'}
+                                            ). Se envía y recibe entre áreas en{' '}
+                                            <Link
+                                                href="/clc"
+                                                className="text-primary hover:underline"
+                                            >
+                                                Trámite de CLC
+                                            </Link>
+                                            ; Egresos registra el pago cuando la
+                                            recibe.
+                                        </p>
+                                    )}
+
+                                {(orden.movimientos_clc ?? []).length > 0 && (
+                                    <div className="rounded-md border p-3">
+                                        <p className="mb-2 font-semibold">
+                                            Trámite de la CLC
+                                        </p>
+                                        <ol className="space-y-1 text-xs">
+                                            {orden.movimientos_clc.map(
+                                                (m: any) => (
+                                                    <li
+                                                        key={m.id}
+                                                        className="flex flex-wrap gap-x-2"
+                                                    >
+                                                        <span className="text-muted-foreground">
+                                                            {fechaLocal(
+                                                                m.created_at,
+                                                            )}
+                                                        </span>
+                                                        <span className="font-medium">
+                                                            {estadosClc[
+                                                                m.estado_nuevo
+                                                            ] ?? m.estado_nuevo}
+                                                        </span>
+                                                        <span className="text-muted-foreground">
+                                                            ·{' '}
+                                                            {m.usuario?.name ??
+                                                                '—'}
+                                                        </span>
+                                                        {m.observaciones && (
+                                                            <span className="w-full text-red-700">
+                                                                {
+                                                                    m.observaciones
+                                                                }
+                                                            </span>
+                                                        )}
+                                                    </li>
+                                                ),
+                                            )}
+                                        </ol>
+                                    </div>
+                                )}
+
+                                {orden.clc_folio_completo &&
+                                    !orden.pago_fecha &&
+                                    orden.clc_estado === 'recibida_egresos' &&
                                     puede('ordenes-compra-pagar') && (
                                         <form
                                             onSubmit={registrarPago}
@@ -828,9 +1116,11 @@ export default function Show({
                                                     </select>
                                                 </label>
                                                 <label className="grid gap-1 text-xs">
-                                                    Referencia (folio de
-                                                    transferencia o número de
-                                                    cheque)
+                                                    {pagoForm.data
+                                                        .pago_forma ===
+                                                    'transferencia'
+                                                        ? 'Referencia bancaria (opcional; el número de transferencia se genera solo)'
+                                                        : 'Número de cheque'}
                                                     <input
                                                         value={
                                                             pagoForm.data
@@ -850,8 +1140,11 @@ export default function Show({
                                                     type="submit"
                                                     size="sm"
                                                     disabled={
-                                                        !pagoForm.data
-                                                            .pago_referencia ||
+                                                        (pagoForm.data
+                                                            .pago_forma !==
+                                                            'transferencia' &&
+                                                            !pagoForm.data
+                                                                .pago_referencia) ||
                                                         pagoForm.processing
                                                     }
                                                 >
@@ -1004,6 +1297,16 @@ export default function Show({
                         <Button variant="outline" asChild>
                             <Link href="/requisiciones">Volver</Link>
                         </Button>
+                        {puedeCancelar && (
+                            <Button
+                                variant="outline"
+                                className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                onClick={() => setAccion('cancelar')}
+                            >
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Cancelar requisición
+                            </Button>
+                        )}
                         {esPendiente && puedeEditarse && (
                             <>
                                 <Button asChild>
@@ -1012,7 +1315,7 @@ export default function Show({
                                     </Link>
                                 </Button>
                                 <Button
-                                    onClick={() => setShowEnviar(true)}
+                                    onClick={() => setAccion('enviar')}
                                     disabled={extemporaneaPendiente}
                                     title={
                                         extemporaneaPendiente
@@ -1027,24 +1330,12 @@ export default function Show({
                         )}
                         {esRevision && isAdmin && (
                             <>
-                                <Button onClick={() => post('aprobar')}>
+                                <Button onClick={() => setAccion('aprobar')}>
                                     Válida
                                 </Button>
                                 <Button
                                     variant="destructive"
-                                    onClick={() => {
-                                        const motivo = window.prompt(
-                                            'Motivo del rechazo (obligatorio):',
-                                        );
-
-                                        if (motivo?.trim()) {
-                                            router.post(
-                                                `/requisiciones/${id}/rechazar`,
-                                                { motivo },
-                                                { preserveScroll: true },
-                                            );
-                                        }
-                                    }}
+                                    onClick={() => setAccion('rechazar')}
                                 >
                                     No válida
                                 </Button>
@@ -1062,18 +1353,19 @@ export default function Show({
                             </Button>
                         )}
                         {esAprobado && (
-                            <Button onClick={() => post('recursos-materiales')}>
+                            <Button onClick={() => setAccion('recursos')}>
                                 Enviar a Recursos Materiales
                             </Button>
                         )}
-                        {esRecursosMateriales && (
-                            <Button onClick={() => post('recibido')}>
-                                Recibido - Iniciar Cotización
-                            </Button>
-                        )}
+                        {esRecursosMateriales &&
+                            puede('requisiciones-cotizar') && (
+                                <Button onClick={() => setAccion('recibido')}>
+                                    Recibido - Iniciar Cotización
+                                </Button>
+                            )}
                         {esCotizacion &&
                             puedeEditarse &&
-                            puede('requisiciones-edit') && (
+                            puede('requisiciones-cotizar') && (
                                 <Button variant="outline" asChild>
                                     <Link href={`/requisiciones/${id}/edit`}>
                                         Editar Cotización
@@ -1084,9 +1376,8 @@ export default function Show({
                             requisicion.suficiencia !== true &&
                             puede('requisiciones-suficiencia') && (
                                 <Button
-                                    onClick={validarSuficiencia}
+                                    onClick={() => setAccion('suficiencia')}
                                     disabled={
-                                        validando ||
                                         !(parseFloat(requisicion.total) > 0)
                                     }
                                     title={
@@ -1095,9 +1386,7 @@ export default function Show({
                                             : 'Primero captura los precios de la cotización'
                                     }
                                 >
-                                    {validando
-                                        ? 'Validando...'
-                                        : 'Validar suficiencia presupuestal'}
+                                    Validar suficiencia presupuestal
                                 </Button>
                             )}
                         {requisicion.suficiencia === false &&
@@ -1121,38 +1410,59 @@ export default function Show({
                 </div>
             </div>
 
-            <Dialog open={showEnviar} onOpenChange={setShowEnviar}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>
-                            ¿Enviar esta requisición a revisión?
-                        </DialogTitle>
-                        <DialogDescription>
-                            No podrá modificarla ni editarla después de
-                            enviarla. La requisición será revisada por el área
-                            de Presupuesto.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button
-                            variant="outline"
-                            onClick={() => setShowEnviar(false)}
-                        >
-                            Cancelar
-                        </Button>
-                        <Button
-                            onClick={() =>
-                                post('enviar', {
-                                    onSuccess: () => setShowEnviar(false),
-                                })
-                            }
-                        >
-                            Enviar a Revisión
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <EditarFecha
+                abierto={editarFecha === 'requisicion'}
+                onCerrar={() => setEditarFecha(null)}
+                titulo="Cambiar fecha de la requisición"
+                descripcion="Es la fecha de trámite que se imprime en el formato (FUR). Debe ser del mismo ejercicio que el folio y queda registrada en la bitácora."
+                documento={requisicion.folio_completo}
+                fechaActual={
+                    requisicion.solicitado
+                        ? String(requisicion.solicitado).slice(0, 10)
+                        : null
+                }
+                url={`/requisiciones/${id}/fecha`}
+            />
+            {orden && (
+                <EditarFecha
+                    abierto={editarFecha === 'orden'}
+                    onCerrar={() => setEditarFecha(null)}
+                    titulo="Cambiar fecha de la orden de compra"
+                    descripcion="Debe ser del mismo año que el folio y no posterior al pago registrado. Queda registrada en la bitácora de la requisición."
+                    documento={orden.folio_completo}
+                    fechaActual={String(orden.fecha).slice(0, 10)}
+                    url={`/ordenes-compra/${orden.id}/fecha`}
+                />
+            )}
 
+            {config && (
+                <ConfirmarAccion
+                    abierto={accion !== null}
+                    onCerrar={() => setAccion(null)}
+                    titulo={config.titulo}
+                    descripcion={config.descripcion}
+                    tono={config.tono}
+                    encabezado={(config.resumen ?? resumen).encabezado}
+                    datos={(config.resumen ?? resumen).datos}
+                    etiqueta={
+                        accion === 'extemporanea' ? (
+                            <Badge
+                                className="shrink-0 bg-amber-100 text-amber-900"
+                                variant="secondary"
+                            >
+                                Extemporánea
+                            </Badge>
+                        ) : undefined
+                    }
+                    cambio={
+                        config.a ? { de: estadoActual, a: config.a } : undefined
+                    }
+                    motivo={config.motivo}
+                    textoConfirmar={config.textoConfirmar}
+                    textoCerrar={accion === 'cancelar' ? 'Regresar' : undefined}
+                    onConfirmar={config.ejecutar}
+                />
+            )}
             <Dialog open={showResultado} onOpenChange={setShowResultado}>
                 <DialogContent className="sm:max-w-3xl">
                     <DialogHeader>

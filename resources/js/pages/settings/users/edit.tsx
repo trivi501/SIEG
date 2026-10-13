@@ -1,5 +1,7 @@
 ﻿import { Head, Link } from '@inertiajs/react';
+import { Form } from '@inertiajs/react';
 import { ArrowLeft, Shield } from 'lucide-react';
+import AdscripcionUsuario from '@/components/adscripcion-usuario';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,7 +13,6 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Form } from '@inertiajs/react';
 
 type Role = {
     id: number;
@@ -23,10 +24,23 @@ type User = {
     name: string;
     email: string;
     id_cat_egreso_unidad_administrativa: number | null;
+    titulo: string | null;
+    cargo: string | null;
+    regidor_id: number | null;
     roles: number[];
 };
 
-export default function Edit({ user, roles, unidades }: { user: User; roles: Role[]; unidades: { id: number; nombre: string }[] }) {
+export default function Edit({
+    user,
+    roles,
+    unidades,
+    regidores,
+}: {
+    user: User;
+    roles: Role[];
+    unidades: { id: number; nombre: string }[];
+    regidores: { id: number; nombre: string }[];
+}) {
     return (
         <>
             <Head title="Edit User" />
@@ -97,23 +111,12 @@ export default function Edit({ user, roles, unidades }: { user: User; roles: Rol
                                         )}
                                     </div>
 
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="id_cat_egreso_unidad_administrativa">Secretaría o dirección</Label>
-                                        <select
-                                            id="id_cat_egreso_unidad_administrativa"
-                                            name="id_cat_egreso_unidad_administrativa"
-                                            defaultValue={user.id_cat_egreso_unidad_administrativa ?? ''}
-                                            className="block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring"
-                                        >
-                                            <option value="">Sin asignar</option>
-                                            {unidades.map((u) => (
-                                                <option key={u.id} value={u.id}>{u.nombre}</option>
-                                            ))}
-                                        </select>
-                                        <p className="text-xs text-muted-foreground">
-                                            Solo verá las requisiciones y el presupuesto de esta secretaría o dirección.
-                                        </p>
-                                    </div>
+                                    <AdscripcionUsuario
+                                        unidades={unidades}
+                                        regidores={regidores}
+                                        errors={errors}
+                                        inicial={user}
+                                    />
 
                                     <div className="grid gap-2">
                                         <Label>Roles</Label>

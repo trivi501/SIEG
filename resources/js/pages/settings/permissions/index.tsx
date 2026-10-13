@@ -1,15 +1,11 @@
 import { Head, Link, router } from '@inertiajs/react';
-import { useState } from 'react';
 import { Plus, Key, Pencil, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
     TableBody,
@@ -45,13 +41,19 @@ interface Filters {
     guard_name?: string;
 }
 
-export default function Index({ permissions, filters }: { permissions: PaginatedData<Permission>; filters?: Filters }) {
+export default function Index({
+    permissions,
+    filters,
+}: {
+    permissions: PaginatedData<Permission>;
+    filters?: Filters;
+}) {
     const [columnFilters, setColumnFilters] = useState<Filters>(filters ?? {});
 
+    const [borrar, setBorrar] = useState<Permission | null>(null);
+
     const handleDelete = (permission: Permission) => {
-        if (confirm(`Are you sure you want to delete "${permission.name}"?`)) {
-            router.delete(`/settings/permissions/${permission.id}`);
-        }
+        setBorrar(permission);
     };
 
     const handleColumnFilterChange = (field: keyof Filters, value: string) => {
@@ -61,9 +63,14 @@ export default function Index({ permissions, filters }: { permissions: Paginated
     const handleSearch = () => {
         const params: Record<string, string> = {};
         Object.entries(columnFilters).forEach(([key, val]) => {
-            if (val) params[key] = val;
+            if (val) {
+params[key] = val;
+}
         });
-        router.get('/settings/permissions', params, { preserveState: true, replace: true });
+        router.get('/settings/permissions', params, {
+            preserveState: true,
+            replace: true,
+        });
     };
 
     const handleColumnFilterKeyDown = (e: React.KeyboardEvent) => {
@@ -104,15 +111,24 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                     <TableHead>Category</TableHead>
                                     <TableHead>Guard</TableHead>
                                     <TableHead>Created</TableHead>
-                                    <TableHead className="w-[100px]">Actions</TableHead>
+                                    <TableHead className="w-[100px]">
+                                        Actions
+                                    </TableHead>
                                 </TableRow>
                                 <TableRow>
                                     <TableHead>
                                         <input
                                             type="text"
                                             value={columnFilters.name ?? ''}
-                                            onChange={(e) => handleColumnFilterChange('name', e.target.value)}
-                                            onKeyDown={handleColumnFilterKeyDown}
+                                            onChange={(e) =>
+                                                handleColumnFilterChange(
+                                                    'name',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            onKeyDown={
+                                                handleColumnFilterKeyDown
+                                            }
                                             placeholder="Filtrar..."
                                             className="block w-full rounded-md border-gray-300 px-2 py-1 text-xs shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                         />
@@ -120,9 +136,19 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                     <TableHead>
                                         <input
                                             type="text"
-                                            value={columnFilters.nombre_mostrar ?? ''}
-                                            onChange={(e) => handleColumnFilterChange('nombre_mostrar', e.target.value)}
-                                            onKeyDown={handleColumnFilterKeyDown}
+                                            value={
+                                                columnFilters.nombre_mostrar ??
+                                                ''
+                                            }
+                                            onChange={(e) =>
+                                                handleColumnFilterChange(
+                                                    'nombre_mostrar',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            onKeyDown={
+                                                handleColumnFilterKeyDown
+                                            }
                                             placeholder="Filtrar..."
                                             className="block w-full rounded-md border-gray-300 px-2 py-1 text-xs shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                         />
@@ -130,9 +156,18 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                     <TableHead>
                                         <input
                                             type="text"
-                                            value={columnFilters.categoria ?? ''}
-                                            onChange={(e) => handleColumnFilterChange('categoria', e.target.value)}
-                                            onKeyDown={handleColumnFilterKeyDown}
+                                            value={
+                                                columnFilters.categoria ?? ''
+                                            }
+                                            onChange={(e) =>
+                                                handleColumnFilterChange(
+                                                    'categoria',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            onKeyDown={
+                                                handleColumnFilterKeyDown
+                                            }
                                             placeholder="Filtrar..."
                                             className="block w-full rounded-md border-gray-300 px-2 py-1 text-xs shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                         />
@@ -140,16 +175,31 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                     <TableHead>
                                         <input
                                             type="text"
-                                            value={columnFilters.guard_name ?? ''}
-                                            onChange={(e) => handleColumnFilterChange('guard_name', e.target.value)}
-                                            onKeyDown={handleColumnFilterKeyDown}
+                                            value={
+                                                columnFilters.guard_name ?? ''
+                                            }
+                                            onChange={(e) =>
+                                                handleColumnFilterChange(
+                                                    'guard_name',
+                                                    e.target.value,
+                                                )
+                                            }
+                                            onKeyDown={
+                                                handleColumnFilterKeyDown
+                                            }
                                             placeholder="Filtrar..."
                                             className="block w-full rounded-md border-gray-300 px-2 py-1 text-xs shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                                         />
                                     </TableHead>
                                     <TableHead />
                                     <TableHead>
-                                        <Button type="button" size="sm" variant="secondary" onClick={handleSearch} className="w-full">
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={handleSearch}
+                                            className="w-full"
+                                        >
                                             Buscar
                                         </Button>
                                     </TableHead>
@@ -158,7 +208,10 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                             <TableBody>
                                 {permissions.data.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                        <TableCell
+                                            colSpan={6}
+                                            className="text-center text-muted-foreground"
+                                        >
                                             No permissions found.
                                         </TableCell>
                                     </TableRow>
@@ -173,28 +226,46 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                         </TableCell>
                                         <TableCell>
                                             {permission.nombre_mostrar || (
-                                                <span className="text-muted-foreground italic">—</span>
+                                                <span className="text-muted-foreground italic">
+                                                    —
+                                                </span>
                                             )}
                                         </TableCell>
                                         <TableCell>
                                             {permission.categoria || (
-                                                <span className="text-muted-foreground italic">—</span>
+                                                <span className="text-muted-foreground italic">
+                                                    —
+                                                </span>
                                             )}
                                         </TableCell>
                                         <TableCell>
-                                            <Badge variant="secondary">{permission.guard_name}</Badge>
+                                            <Badge variant="secondary">
+                                                {permission.guard_name}
+                                            </Badge>
                                         </TableCell>
                                         <TableCell className="text-muted-foreground">
                                             {permission.created_at}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">
-                                                <Button variant="ghost" size="icon" asChild>
-                                                    <Link href={`/settings/permissions/${permission.id}/edit`}>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    asChild
+                                                >
+                                                    <Link
+                                                        href={`/settings/permissions/${permission.id}/edit`}
+                                                    >
                                                         <Pencil className="h-4 w-4" />
                                                     </Link>
                                                 </Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleDelete(permission)}>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() =>
+                                                        handleDelete(permission)
+                                                    }
+                                                >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </div>
@@ -213,7 +284,11 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                                         preserveScroll
                                         className={`inline-flex items-center rounded px-3 py-1 text-sm ${link.active ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`}
                                     >
-                                        <span dangerouslySetInnerHTML={{ __html: link.label }} />
+                                        <span
+                                            dangerouslySetInnerHTML={{
+                                                __html: link.label,
+                                            }}
+                                        />
                                     </Link>
                                 ))}
                             </div>
@@ -221,6 +296,25 @@ export default function Index({ permissions, filters }: { permissions: Paginated
                     </CardContent>
                 </Card>
             </div>
+            <ConfirmarAccion
+                abierto={borrar !== null}
+                onCerrar={() => setBorrar(null)}
+                titulo="Eliminar permiso"
+                descripcion="Se quita de todos los roles que lo tengan. Si sigue en el sistema, permissions:sync lo vuelve a crear."
+                tono="peligro"
+                encabezado={{
+                    titulo: borrar?.name,
+                    subtitulo: borrar?.nombre_mostrar ?? undefined,
+                }}
+                datos={[
+                    { etiqueta: 'Categoría', valor: borrar?.categoria ?? '—' },
+                ]}
+                textoConfirmar="Eliminar permiso"
+                textoProcesando="Eliminando..."
+                onConfirmar={(_, op) =>
+                    router.delete(`/settings/permissions/${borrar?.id}`, op)
+                }
+            />
         </>
     );
 }

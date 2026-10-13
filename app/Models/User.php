@@ -15,12 +15,12 @@ use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Spatie\Permission\Traits\HasRoles;
 
-#[Fillable(['name', 'email', 'password', 'id_cat_egreso_unidad_administrativa'])]
+#[Fillable(['name', 'titulo', 'cargo', 'email', 'password', 'id_cat_egreso_unidad_administrativa', 'regidor_id'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable implements PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
-    use Auditable, HasFactory, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable, HasRoles;
+    use Auditable, HasFactory, HasRoles, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable;
 
     /**
      * Get the attributes that should be cast.
@@ -31,6 +31,18 @@ class User extends Authenticatable implements PasskeyUser
     public function unidadAdministrativa()
     {
         return $this->belongsTo(EgresoUnidadAdministrativa::class, 'id_cat_egreso_unidad_administrativa', 'id_cat_egreso_unidad_administrativa');
+    }
+
+    /** Regidor al que pertenece (sus enlaces); si no tiene, pertenece a su secretaría o dirección. */
+    public function regidor()
+    {
+        return $this->belongsTo(Regidor::class);
+    }
+
+    /** Nombre con su título para los formatos: "L.C. FATIMA JANETH ARTEAGA SALINAS". */
+    public function nombreConTitulo(): string
+    {
+        return trim(trim((string) $this->titulo).' '.$this->name);
     }
 
     protected function casts(): array

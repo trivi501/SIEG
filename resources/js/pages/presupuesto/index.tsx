@@ -1,11 +1,8 @@
 import { Form, Head, Link, router, usePage } from '@inertiajs/react';
 import { ChevronLeft, ChevronRight, Eye, Pencil, Plus, Search, X } from 'lucide-react';
-import { money } from '@/lib/presupuesto';
+import { useEffect, useState, useCallback } from 'react';
 import DesplazableConMouse from '@/components/desplazable-con-mouse';
-import { presupuesto } from '@/routes';
-import { destroy, importMethod } from '@/routes/presupuesto';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
     Dialog,
     DialogContent,
@@ -13,6 +10,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
     Table,
     TableBody,
@@ -21,8 +19,10 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { money } from '@/lib/presupuesto';
+import { presupuesto } from '@/routes';
+import { destroy, importMethod } from '@/routes/presupuesto';
 import type { PresupuestoEgreso } from '@/types';
-import { useEffect, useState, useCallback } from 'react';
 
 type Paginated = {
     data: PresupuestoEgreso[];
@@ -114,20 +114,29 @@ export default function Presupuesto({
     const submitSearch = useCallback(() => {
         const params = new URLSearchParams();
         params.set('page', '1');
+
         for (const [k, v] of Object.entries(search)) {
-            if (v) params.set(k, v);
+            if (v) {
+params.set(k, v);
+}
         }
+
         router.get(presupuesto.url(), Object.fromEntries(params), { preserveScroll: true, preserveState: true });
     }, [search]);
 
     useEffect(() => {
         const timer = setTimeout(submitSearch, 400);
+
         return () => clearTimeout(timer);
     }, [submitSearch]);
 
     const clearSearch = () => {
         const empty: Record<string, string> = {};
-        for (const k of Object.keys(search)) empty[k] = '';
+
+        for (const k of Object.keys(search)) {
+empty[k] = '';
+}
+
         setSearch(empty);
         router.get(presupuesto.url(), { page: '1' }, { preserveScroll: true });
     };
@@ -242,7 +251,9 @@ export default function Presupuesto({
                                     <TableHead>Capítulo</TableHead>
                                     <TableHead>Nombre Partida</TableHead>
                                     <TableHead>Tipo Gasto</TableHead>
-                                    <TableHead className="text-right">Total</TableHead>
+                                    <TableHead className="text-right">Aprobado</TableHead>
+                                    <TableHead className="text-right">Modificado</TableHead>
+                                    <TableHead className="text-right">Vigente</TableHead>
                                     <TableHead className="text-right">Comprometido</TableHead>
                                     <TableHead className="text-right">Devengado</TableHead>
                                     <TableHead className="text-right">Pagado</TableHead>
@@ -262,13 +273,13 @@ export default function Presupuesto({
                                             </div>
                                         </TableHead>
                                     ))}
-                                    <TableHead colSpan={5} />
+                                    <TableHead colSpan={7} />
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {presupuestos.data.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={13} className="py-8 text-center text-muted-foreground">
+                                        <TableCell colSpan={15} className="py-8 text-center text-muted-foreground">
                                             {hasFilters ? 'Sin resultados para los filtros aplicados.' : 'No hay registros. Importe un archivo Excel.'}
                                         </TableCell>
                                     </TableRow>
@@ -294,6 +305,12 @@ export default function Presupuesto({
                                                     </div>
                                                 )}
                                             </TableCell>
+                                            <TableCell
+                                                className={`text-right font-mono ${p.modificado ? (p.modificado < 0 ? 'text-destructive' : 'text-green-700') : 'text-muted-foreground'}`}
+                                            >
+                                                {money(p.modificado ?? 0)}
+                                            </TableCell>
+                                            <TableCell className="text-right font-mono font-semibold">{money(p.vigente ?? p.IMPORTE_TOTAL)}</TableCell>
                                             {(['comprometido', 'devengado', 'pagado'] as const).map((momento) => (
                                                 <TableCell
                                                     key={momento}

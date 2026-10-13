@@ -17,11 +17,10 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 final class ExcelGasto
 {
     public const IMPORTES = [
-        'asignado' => 'Asignado',
+        'asignado' => 'Aprobado',
         'modificado' => 'Modificado',
         'vigente' => 'Vigente',
         'comprometido' => 'Comprometido',
-        'en_tramite' => 'En trámite',
         'devengado' => 'Devengado',
         'pagado' => 'Pagado',
         'disponible' => 'Disponible',

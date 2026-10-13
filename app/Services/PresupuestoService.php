@@ -182,7 +182,7 @@ class PresupuestoService
             ->join('tb_egreso_requisicion as r', 'r.id_tb_egreso_requisicion', '=', 'd.id_tb_egreso_requisicion')
             ->join('cat_egreso_unidad_administrativa as u', 'u.id_cat_egreso_unidad_administrativa', '=', 'r.id_cat_egreso_unidad_administrativa')
             ->leftJoin('ordenes_compra as oc', 'oc.id_tb_egreso_requisicion', '=', 'r.id_tb_egreso_requisicion')
-            ->where('r.id_cat_egreso_requisicion_estado', '!=', 4) // rechazada no compromete presupuesto
+            ->whereNotIn('r.id_cat_egreso_requisicion_estado', [4, EgresoRequisicion::CANCELADA]) // rechazada o cancelada no compromete presupuesto
             ->when($excluirRequisicion, fn ($q) => $q->where('r.id_tb_egreso_requisicion', '!=', $excluirRequisicion))
             ->selectRaw('u.clave, d.fuente, d.proyecto, d.partida, r.suficiencia,
                 CASE WHEN oc.xml_uuid IS NOT NULL THEN 1 ELSE 0 END as devengado,

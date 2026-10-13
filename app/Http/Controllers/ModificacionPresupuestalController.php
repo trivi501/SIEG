@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\EgresoRequisicion;
+use App\Models\EgresoUnidadAdministrativa;
+use App\Models\Firmante;
 use App\Models\ModificacionPresupuestal;
+use App\Models\PresupuestoEgreso;
 use App\Services\PresupuestoService;
 use App\Services\SaldosMensuales;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -52,11 +55,34 @@ class ModificacionPresupuestalController extends Controller
         }
 
         return Inertia::render('modificaciones-presupuestales/Index', [
-            'modificaciones' => $query->orderByDesc('id')->paginate(20)->withQueryString(),
+            'modificaciones' => $this->conSaldos($query->orderByDesc('id')->paginate(20)->withQueryString()),
             'filters' => $request->only(['tipo', 'estado', 'folio', 'partida']),
             'tipos' => ModificacionPresupuestal::TIPOS,
             'meses' => SaldosMensuales::MESES,
+            'captura' => $this->captura(),
         ]);
+    }
+
+    /** Estado de la captura para el usuario: abierta, hasta qué día y si para él nunca se cierra. */
+    private function captura(): array
+    {
+        $user = auth()->user();
+
+        return [
+            'abierta' => ModificacionPresupuestal::puedeCapturar($user),
+            'siempre' => ModificacionPresupuestal::siempreAbierta($user),
+            'ultimoDia' => ModificacionPresupuestal::ultimoDiaCaptura()->format('Y-m-d'),
+            'diasCierre' => ModificacionPresupuestal::DIAS_CIERRE,
+        ];
+    }
+
+    private function exigirCapturaAbierta(): void
+    {
+        if (! ModificacionPresupuestal::puedeCapturar(auth()->user())) {
+            throw ValidationException::withMessages(['tipo' => 'La captura de modificaciones presupuestales de este mes está cerrada: el último día fue el '
+                .ModificacionPresupuestal::ultimoDiaCaptura()->format('d/m/Y').' ('.ModificacionPresupuestal::DIAS_CIERRE
+                .' días antes del fin de mes). Solo Control Presupuestal puede registrar modificaciones hasta el próximo mes.']);
+        }
     }
 
     public function create(Request $request)
@@ -86,11 +112,14 @@ class ModificacionPresupuestalController extends Controller
             'requisicion' => $requisicion?->only(['id_tb_egreso_requisicion', 'folio_completo']),
             'destinoSugerido' => $destinoSugerido,
             'importeSugerido' => $faltanteSugerido,
+            'captura' => $this->captura(),
         ]);
     }
 
     public function store(Request $request)
     {
+        $this->exigirCapturaAbierta();
+
         $validated = $request->validate([
             'tipo' => ['required', Rule::in(array_keys(ModificacionPresupuestal::TIPOS))],
             'origen' => 'nullable|required_if:tipo,traspaso,reduccion|string|max:400',
@@ -118,6 +147,10 @@ class ModificacionPresupuestalController extends Controller
         $origen = $usaOrigen ? $this->lineaPermitida($validated['origen'], $claves, 'origen') : null;
         $destino = $usaDestino ? $this->lineaPermitida($validated['destino'], $claves, 'destino') : null;
         $importe = round((float) $validated['importe'], 2);
+
+        if ($origen && $destino && $origen['fuente'] !== $destino['fuente']) {
+            throw ValidationException::withMessages(['destino' => 'El traspaso solo puede hacerse entre partidas de la misma fuente de financiamiento ('.$origen['fuente'].').']);
+        }
 
         if ($origen && $importe > $origen['disponible']) {
             throw ValidationException::withMessages(['importe' => 'El importe excede el disponible de la línea de origen ($'.number_format($origen['disponible'], 2).').']);
@@ -169,12 +202,31 @@ class ModificacionPresupuestalController extends Controller
         $this->autorizarVer($modificacion);
         $modificacion->load('solicitante:id,name', 'autorizador:id,name', 'requisicion:id_tb_egreso_requisicion,folio_completo');
 
-        return Pdf::loadView('modificaciones-presupuestales.pdf', [
+        // Unidad que solicita: la del emisor (o la del receptor en una ampliación). Firma su titular:
+        // el firmante configurado para el formato (Catálogos → Firmantes) o el responsable de la unidad.
+        $unidad = EgresoUnidadAdministrativa::where('clave', $modificacion->origen_clave ?? $modificacion->destino_clave)->first();
+        $firmante = Firmante::titularDe($modificacion->solicitante()->with('regidor')->first(), 'modificacion_presupuestal', $unidad?->id_cat_egreso_unidad_administrativa, $modificacion->created_at);
+
+        // Tipo de gasto de cada partida (columna del presupuesto importado).
+        $tipoGasto = fn (string $lado) => $modificacion->{"{$lado}_clave"} === null ? null : PresupuestoEgreso::query()
+            ->where('CLAVE', $modificacion->{"{$lado}_clave"})->where('CLAVE3', $modificacion->{"{$lado}_fuente"})
+            ->where('CLAVE6', $modificacion->{"{$lado}_proyecto"})->where('PARTIDA', $modificacion->{"{$lado}_partida"})
+            ->value('TIPO_DE_GASTO');
+
+        $pdf = Pdf::loadView('modificaciones-presupuestales.pdf', [
             'modificacion' => $modificacion,
-            'tipos' => ModificacionPresupuestal::TIPOS,
-            'origen' => ($c = $modificacion->claveLinea('origen')) ? $this->presupuesto->linea($c) : null,
-            'destino' => ($c = $modificacion->claveLinea('destino')) ? $this->presupuesto->linea($c) : null,
-        ])->stream("{$modificacion->folio_completo}.pdf");
+            'unidad' => $unidad,
+            'firmante' => $firmante,
+            'tipoGasto' => ['origen' => $tipoGasto('origen'), 'destino' => $tipoGasto('destino')],
+        ])->setPaper('letter', 'landscape');
+
+        // "Página N de M" en el pie (dompdf no conoce el total de páginas desde el CSS).
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $canvas->page_text($canvas->get_width() - 150, $canvas->get_height() - 30.5, 'Página {PAGE_NUM} de {PAGE_COUNT}',
+            $pdf->getDomPDF()->getFontMetrics()->getFont('Helvetica', 'bold'), 7);
+
+        return $pdf->stream("{$modificacion->folio_completo}.pdf");
     }
 
     public function autorizar(Request $request, ModificacionPresupuestal $modificacion)
@@ -192,6 +244,9 @@ class ModificacionPresupuestalController extends Controller
 
             if (($mod->claveLinea('origen') && ! $origen) || ($mod->claveLinea('destino') && ! $destino)) {
                 throw ValidationException::withMessages(['observaciones' => 'Una de las líneas ya no existe en el presupuesto importado.']);
+            }
+            if ($origen && $destino && $origen['fuente'] !== $destino['fuente']) {
+                throw ValidationException::withMessages(['observaciones' => 'El traspaso solo puede hacerse entre partidas de la misma fuente de financiamiento.']);
             }
             // El disponible pudo cambiar desde la solicitud (otras requisiciones o modificaciones).
             if ($origen && $mod->importe > $origen['disponible']) {
@@ -232,6 +287,34 @@ class ModificacionPresupuestalController extends Controller
         ]);
 
         return back()->with('success', 'Modificación rechazada.');
+    }
+
+    /**
+     * Saldos actuales de las partidas de origen y destino de cada modificación de la página: disponible
+     * anual y, si tiene periodo, el disponible de ese mes.
+     */
+    private function conSaldos($paginado)
+    {
+        $modificaciones = collect($paginado->items());
+        $claves = $modificaciones->flatMap(fn ($m) => [$m->claveLinea('origen'), $m->claveLinea('destino')])->filter()->unique()->values();
+
+        if ($claves->isEmpty()) {
+            return $paginado;
+        }
+
+        $lineas = $this->presupuesto->lineas($claves->map(fn ($c) => explode('|', $c)[0])->unique()->values()->all())->keyBy('clave');
+        $porAño = $modificaciones->groupBy('año')->map(fn ($ms) => (new SaldosMensuales)->disponiblesPorMes((int) $ms->first()->año, $claves->all()));
+
+        return $paginado->through(function ($m) use ($lineas, $porAño) {
+            foreach (['origen', 'destino'] as $lado) {
+                $clave = $m->claveLinea($lado);
+                $mes = $m->{"{$lado}_mes"};
+                $m->setAttribute("{$lado}_disponible", $clave ? ($lineas[$clave]['disponible'] ?? null) : null);
+                $m->setAttribute("{$lado}_disponible_mes", $clave && $mes ? ($porAño[$m->año][$clave][$mes] ?? null) : null);
+            }
+
+            return $m;
+        });
     }
 
     private function mesActual(): int

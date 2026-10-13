@@ -1,5 +1,7 @@
 import { Head, Link } from '@inertiajs/react';
+import { Form } from '@inertiajs/react';
 import { ArrowLeft, Shield } from 'lucide-react';
+import AdscripcionUsuario from '@/components/adscripcion-usuario';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
 import {
@@ -11,14 +13,21 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Form } from '@inertiajs/react';
 
 type Role = {
     id: number;
     name: string;
 };
 
-export default function Create({ roles, unidades }: { roles: Role[]; unidades: { id: number; nombre: string }[] }) {
+export default function Create({
+    roles,
+    unidades,
+    regidores,
+}: {
+    roles: Role[];
+    unidades: { id: number; nombre: string }[];
+    regidores: { id: number; nombre: string }[];
+}) {
     return (
         <>
             <Head title="Create User" />
@@ -90,22 +99,11 @@ export default function Create({ roles, unidades }: { roles: Role[]; unidades: {
                                         )}
                                     </div>
 
-                                    <div className="grid gap-2">
-                                        <Label htmlFor="id_cat_egreso_unidad_administrativa">Secretaría o dirección</Label>
-                                        <select
-                                            id="id_cat_egreso_unidad_administrativa"
-                                            name="id_cat_egreso_unidad_administrativa"
-                                            className="block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring"
-                                        >
-                                            <option value="">Sin asignar</option>
-                                            {unidades.map((u) => (
-                                                <option key={u.id} value={u.id}>{u.nombre}</option>
-                                            ))}
-                                        </select>
-                                        <p className="text-xs text-muted-foreground">
-                                            Solo verá las requisiciones y el presupuesto de esta secretaría o dirección.
-                                        </p>
-                                    </div>
+                                    <AdscripcionUsuario
+                                        unidades={unidades}
+                                        regidores={regidores}
+                                        errors={errors}
+                                    />
 
                                     <div className="grid gap-2">
                                         <Label>Roles</Label>

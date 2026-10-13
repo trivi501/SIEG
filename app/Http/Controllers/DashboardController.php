@@ -36,6 +36,7 @@ class DashboardController extends Controller
 
         return Inertia::render('dashboard', [
             'resumen' => [
+                'verPresupuesto' => $user->can('gasto-index'),
                 'totales' => $totales,
                 'lineas' => $lineas->count(),
                 'lineasSinDisponible' => $lineas->where('disponible', '<=', 0)->count(),

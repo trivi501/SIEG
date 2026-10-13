@@ -3,6 +3,7 @@
 use App\Catalogos\Catalogos;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\CatalogoController;
+use App\Http\Controllers\ClcController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EgresoRequisicionController;
 use App\Http\Controllers\ModificacionPresupuestalController;
@@ -52,19 +53,24 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('logs', [LogViewerController::class, 'index'])->name('logs.index')->middleware('permission:logs-view');
 
     // Recursos Materiales dashboard
-    Route::get('recursos-materiales', [EgresoRequisicionController::class, 'recursosMateriales'])->name('recursos-materiales.index')->middleware('permission:requisiciones-index');
+    Route::get('recursos-materiales', [EgresoRequisicionController::class, 'recursosMateriales'])->name('recursos-materiales.index')->middleware('permission:recursos-materiales-index');
 
     // Requisiciones
     Route::get('requisiciones', [EgresoRequisicionController::class, 'index'])->name('requisiciones.index')->middleware('permission:requisiciones-index');
-    Route::get('requisiciones/gasto', [EgresoRequisicionController::class, 'gasto'])->name('requisiciones.gasto')->middleware('permission:requisiciones-index');
-    Route::get('requisiciones/gasto/exportar', [EgresoRequisicionController::class, 'exportarGasto'])->name('requisiciones.gasto.exportar')->middleware('permission:requisiciones-index');
+    Route::get('requisiciones/gasto', [EgresoRequisicionController::class, 'gasto'])->name('requisiciones.gasto')->middleware('permission:gasto-index');
+    Route::get('requisiciones/gasto/detalle', [EgresoRequisicionController::class, 'gastoDetalle'])->name('requisiciones.gasto.detalle')->middleware('permission:gasto-index');
+    Route::get('requisiciones/gasto/exportar', [EgresoRequisicionController::class, 'exportarGasto'])->name('requisiciones.gasto.exportar')->middleware('permission:gasto-index');
     Route::get('requisiciones/{requisicion}/pdf', [EgresoRequisicionController::class, 'pdf'])->name('requisiciones.pdf')->middleware('permission:requisiciones-index');
     Route::post('requisiciones/{requisicion}/autorizar-extemporanea', [EgresoRequisicionController::class, 'autorizarExtemporanea'])->name('requisiciones.extemporanea')->middleware('permission:requisiciones-extemporaneas');
+    // Permiso requisiciones-fecha o enlace de la misma secretaría (se revisa en el controlador).
+    Route::post('requisiciones/{requisicion}/fecha', [EgresoRequisicionController::class, 'cambiarFecha'])->name('requisiciones.fecha')->middleware('permission:requisiciones-index');
+    // Permiso requisiciones-cancelar o enlace de la misma secretaría (se revisa en el controlador).
+    Route::post('requisiciones/{requisicion}/cancelar', [EgresoRequisicionController::class, 'cancelar'])->name('requisiciones.cancelar')->middleware('permission:requisiciones-index');
     Route::post('requisiciones/{requisicion}/enviar', [EgresoRequisicionController::class, 'enviarRevision'])->name('requisiciones.enviar')->middleware('permission:requisiciones-create');
     Route::post('requisiciones/{requisicion}/aprobar', [EgresoRequisicionController::class, 'aprobar'])->name('requisiciones.aprobar')->middleware('permission:requisiciones-edit');
     Route::post('requisiciones/{requisicion}/rechazar', [EgresoRequisicionController::class, 'rechazar'])->name('requisiciones.rechazar')->middleware('permission:requisiciones-edit');
     Route::post('requisiciones/{requisicion}/recursos-materiales', [EgresoRequisicionController::class, 'enviarRecursosMateriales'])->name('requisiciones.recursos')->middleware('permission:requisiciones-edit');
-    Route::post('requisiciones/{requisicion}/recibido', [EgresoRequisicionController::class, 'recibido'])->name('requisiciones.recibido')->middleware('permission:requisiciones-edit');
+    Route::post('requisiciones/{requisicion}/recibido', [EgresoRequisicionController::class, 'recibido'])->name('requisiciones.recibido')->middleware('permission:requisiciones-cotizar');
     Route::post('requisiciones', [EgresoRequisicionController::class, 'store'])->name('requisiciones.store')->middleware('permission:requisiciones-create');
     Route::get('requisiciones/crear', [EgresoRequisicionController::class, 'create'])->name('requisiciones.create')->middleware('permission:requisiciones-create');
     Route::get('requisiciones/{requisicion}', [EgresoRequisicionController::class, 'show'])->name('requisiciones.show')->middleware('permission:requisiciones-index');
@@ -77,8 +83,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('requisiciones/{requisicion}/orden-compra', [OrdenCompraController::class, 'store'])->name('ordenes-compra.store')->middleware('permission:ordenes-compra-create');
     Route::get('ordenes-compra/{ordenCompra}/pdf', [OrdenCompraController::class, 'pdf'])->name('ordenes-compra.pdf')->middleware('permission:requisiciones-index');
     Route::post('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'cargarXml'])->name('ordenes-compra.xml')->middleware('permission:ordenes-compra-create');
+    // Trámite de CLC entre áreas (cada acción revisa su propio permiso en App\Services\TramiteClc).
+    Route::get('clc', [ClcController::class, 'index'])->name('clc.index')->middleware('permission:clc-index');
+    Route::post('clc/accion', [ClcController::class, 'accion'])->name('clc.accion')->middleware('permission:clc-index');
+    Route::get('clc/relaciones/{relacion}/pdf', [ClcController::class, 'relacionPdf'])->name('clc.relacion.pdf')->middleware('permission:clc-index');
     Route::post('ordenes-compra/{ordenCompra}/pago', [OrdenCompraController::class, 'registrarPago'])->name('ordenes-compra.pago')->middleware('permission:ordenes-compra-pagar');
     Route::get('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'descargarXml'])->name('ordenes-compra.xml.descargar')->middleware('permission:requisiciones-index');
+    Route::post('ordenes-compra/{ordenCompra}/fecha', [OrdenCompraController::class, 'cambiarFecha'])->name('ordenes-compra.fecha')->middleware('permission:ordenes-compra-fecha');
     Route::post('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'generarClc'])->name('ordenes-compra.clc')->middleware('permission:requisiciones-clc');
     Route::get('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'clcPdf'])->name('ordenes-compra.clc.pdf')->middleware('permission:requisiciones-index');
 

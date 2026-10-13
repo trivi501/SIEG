@@ -13,6 +13,7 @@ use App\Models\EjercicioFiscal;
 use App\Models\Firmante;
 use App\Models\Proveedor;
 use App\Models\ProveedorCuenta;
+use App\Models\Regidor;
 use App\Models\TipoDocumento;
 use App\Models\User;
 use App\Models\Vehiculo;
@@ -109,6 +110,24 @@ final class Catalogos
                 llave: ['id_cat_egreso_unidad_administrativa', 'nombre'],
             ),
             new Catalogo(
+                slug: 'regidores',
+                titulo: 'Regidores',
+                singular: 'regidor',
+                grupo: 'Estructura orgánica',
+                descripcion: 'Integrantes del Cabildo. Sus enlaces (usuarios) les pertenecen: el regidor firma sus requisiciones y CLC; para el presupuesto quedan en Cabildo.',
+                modelo: Regidor::class,
+                campos: [
+                    Campo::texto('titulo', 'Título')->max(30)->mayusculas()->ayuda('Ej. LIC., MTRA., ING.'),
+                    Campo::texto('nombre', 'Nombre')->requerido()->max(200)->mayusculas(),
+                    Campo::seleccion('cargo', 'Cargo', ['REGIDOR' => 'Regidor', 'REGIDORA' => 'Regidora'])->requerido()->porDefecto('REGIDOR'),
+                    Campo::texto('comision', 'Comisión')->max(300),
+                    Campo::calculado('enlaces', 'Enlaces', fn ($r) => (string) User::where('regidor_id', $r->getKey())->count()),
+                    Campo::activo(),
+                ],
+                buscar: ['nombre', 'comision'],
+                llave: ['nombre'],
+            ),
+            new Catalogo(
                 slug: 'firmantes',
                 titulo: 'Responsables y firmantes',
                 singular: 'firmante',
@@ -122,7 +141,7 @@ final class Catalogos
                         ->ayuda('Vacío = aplica a todas las secretarías y direcciones.'),
                     Campo::texto('nombre', 'Nombre')->requerido()->max(200),
                     Campo::texto('cargo', 'Cargo')->requerido()->max(200),
-                    Campo::fecha('vigente_desde', 'Vigente desde')->requerido()->porDefecto(fn () => now()->toDateString()),
+                    Campo::fecha('vigente_desde', 'Vigente desde')->requerido()->porDefecto(fn () => now('America/Mexico_City')->toDateString()),
                     Campo::fecha('vigente_hasta', 'Vigente hasta')->reglas(['after_or_equal:vigente_desde'])->ayuda('Vacío = sigue vigente.'),
                     Campo::activo(),
                 ],

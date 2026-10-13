@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Models\Concerns\Auditable;
 use App\Services\PresupuestoService;
+use App\Services\SaldosMensuales;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 
 class ModificacionPresupuestal extends Model
@@ -37,6 +39,33 @@ class ModificacionPresupuestal extends Model
             'origen_disponible_antes' => 'float',
             'destino_vigente_antes' => 'float',
         ];
+    }
+
+    /** Días antes del fin de mes en que se cierra la captura para las áreas. */
+    public const DIAS_CIERRE = 3;
+
+    /**
+     * Último día del mes en que las áreas pueden capturar: el fin de mes menos DIAS_CIERRE (en octubre,
+     * hasta el 28; del 29 al 31 está cerrada).
+     */
+    public static function ultimoDiaCaptura(?CarbonImmutable $hoy = null): CarbonImmutable
+    {
+        $hoy ??= CarbonImmutable::now(SaldosMensuales::ZONA);
+
+        return $hoy->endOfMonth()->subDays(self::DIAS_CIERRE)->startOfDay();
+    }
+
+    /** Control Presupuestal (quien autoriza) y Admin capturan siempre; las áreas, hasta el día de cierre. */
+    public static function puedeCapturar(User $user, ?CarbonImmutable $hoy = null): bool
+    {
+        $hoy ??= CarbonImmutable::now(SaldosMensuales::ZONA);
+
+        return self::siempreAbierta($user) || $hoy->startOfDay()->lte(self::ultimoDiaCaptura($hoy));
+    }
+
+    public static function siempreAbierta(User $user): bool
+    {
+        return $user->hasRole(['Super Admin', 'Admin']) || $user->can('modificaciones-autorizar');
     }
 
     /** Clave unidad|fuente|proyecto|partida del lado indicado, o null si ese lado no aplica al tipo. */

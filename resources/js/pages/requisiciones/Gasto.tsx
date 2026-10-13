@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import DesplazableConMouse from '@/components/desplazable-con-mouse';
+import DetallePartida from '@/components/detalle-partida';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -50,7 +51,6 @@ type Columna =
     | 'modificado'
     | 'vigente'
     | 'comprometido'
-    | 'en_tramite'
     | 'devengado'
     | 'pagado'
     | 'disponible'
@@ -58,22 +58,21 @@ type Columna =
     | 'disponible_mes';
 
 const columnas: { key: Columna; titulo: string; ayuda: string }[] = [
-    { key: 'asignado', titulo: 'Asignado', ayuda: 'Presupuesto importado' },
+    {
+        key: 'asignado',
+        titulo: 'Aprobado',
+        ayuda: 'Presupuesto aprobado (importado)',
+    },
     {
         key: 'modificado',
         titulo: 'Modificado',
         ayuda: 'Traspasos, ampliaciones y reducciones autorizadas',
     },
-    { key: 'vigente', titulo: 'Vigente', ayuda: 'Asignado ± modificado' },
+    { key: 'vigente', titulo: 'Vigente', ayuda: 'Aprobado ± modificado' },
     {
         key: 'comprometido',
         titulo: 'Comprometido',
         ayuda: 'Requisiciones con suficiencia que aún no tienen factura',
-    },
-    {
-        key: 'en_tramite',
-        titulo: 'En trámite',
-        ayuda: 'Requisiciones cotizadas que aún no tienen suficiencia',
     },
     {
         key: 'devengado',
@@ -98,7 +97,7 @@ const columnas: { key: Columna; titulo: string; ayuda: string }[] = [
     {
         key: 'disponible_mes',
         titulo: 'Disponible del mes',
-        ayuda: 'Saldo corrido + asignado del mes ± modificaciones del mes − comprometido en el mes',
+        ayuda: 'Saldo corrido + aprobado del mes ± modificaciones del mes − comprometido en el mes',
     },
 ];
 
@@ -130,6 +129,9 @@ export default function Gasto({
     const [buscar, setBuscar] = useState('');
     const [confirmarCorrida, setConfirmarCorrida] = useState(false);
     const [corriendo, setCorriendo] = useState(false);
+    const [detalle, setDetalle] = useState<Required<LineaPresupuesto> | null>(
+        null,
+    );
 
     const correrSaldos = () =>
         router.post(
@@ -250,9 +252,9 @@ export default function Gasto({
                     ) : (
                         <span>
                             Los saldos de <strong>{saldos.mes}</strong> aún no
-                            se han corrido. Se corren solos el día 1 de cada
-                            mes; mientras tanto, el saldo corrido se calcula con
-                            los movimientos.
+                            se han corrido. La corrida es manual (botón Correr
+                            saldos); mientras tanto, el saldo corrido se calcula
+                            con los movimientos.
                         </span>
                     )}
                     {saldos.puedeCorrer && (
@@ -348,11 +350,21 @@ export default function Gasto({
                     />
                 </div>
 
+                <DetallePartida
+                    linea={detalle}
+                    onClose={() => setDetalle(null)}
+                />
+
                 <Card>
                     <CardHeader>
                         <CardTitle>
                             Presupuesto por partida ({visibles.length})
                         </CardTitle>
+                        <p className="text-xs text-muted-foreground">
+                            Haz clic en una partida para ver sus requisiciones
+                            (orden de compra, CLC, proveedor, importe y fechas)
+                            y sus modificaciones presupuestales.
+                        </p>
                     </CardHeader>
                     <CardContent>
                         <DesplazableConMouse>
@@ -387,7 +399,12 @@ export default function Gasto({
                                         </TableRow>
                                     )}
                                     {enPagina.map((f) => (
-                                        <TableRow key={f.clave}>
+                                        <TableRow
+                                            key={f.clave}
+                                            className="cursor-pointer"
+                                            title="Ver requisiciones y modificaciones de la partida"
+                                            onClick={() => setDetalle(f)}
+                                        >
                                             <TableCell
                                                 className="text-xs"
                                                 title={f.unidad}

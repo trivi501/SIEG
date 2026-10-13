@@ -15,7 +15,7 @@ La base se creó el 8 de octubre de 2026 copiando de la base de SIEMG (`laravel`
 | `tb_egreso_requisicion_bitacora` | Bitácora de cambios de cada requisición |
 | `cat_egreso_requisicion_estado` | 1 Pendiente, 2 En Revisión, 3 Aprobada, 4 Rechazada, 5 En Recursos Materiales, 6 En Cotización |
 | `proveedores` | Catálogo de proveedores con su cuenta bancaria (`id_cat_banco`, `clabe`, `cuenta_bancaria`); `tb_egreso_proveedor` legado no se usa |
-| `ordenes_compra` | Orden de compra por requisición y datos de su CFDI |
+| `ordenes_compra` | Orden de compra por requisición, datos de su CFDI, CLC y pago (`transferencia_numero` TRF-AÑO-0001, consecutivo por año, único) |
 | `modificaciones_presupuestales` | Traspasos, reducciones y ampliaciones; origen y destino por clave de línea, para sobrevivir a una re-importación del presupuesto |
 | `users` | Usuarios; `id_cat_egreso_unidad_administrativa` = su secretaría o dirección (una sola). `secretaria_id` ya no se usa |
 | `secretarias` | **Sin uso** desde el 2026-10-11 (secretarías y direcciones se unificaron en `cat_egreso_unidad_administrativa`); se conserva por historial |
@@ -23,6 +23,8 @@ La base se creó el 8 de octubre de 2026 copiando de la base de SIEMG (`laravel`
 | `cat_egreso_objeto_gasto`, `cat_egreso_fuente_financiamiento`, `cat_egreso_programa` (+`clave`), `cat_egreso_proyecto`, `cat_banco` (+`clave`) | Catálogos del sistema anterior que ahora se administran en `/catalogos`. **No tienen AUTO_INCREMENT**: el id lo calcula la aplicación |
 | `cat_egreso_unidad_administrativa` (+`responsable`, `cargo_responsable`), `departamentos`, `firmantes` | Estructura orgánica: dirección (centro gestor), sus departamentos y los firmantes de los PDF por tipo de documento |
 | `ejercicios_fiscales`, `tipos_documento` | Ejercicios abierto/cerrado; tipos de documento (`requisicion`, `orden_compra`, `modificacion_presupuestal` se crean con la migración) |
+| `clc_relaciones`, `clc_relacion_orden`, `clc_movimientos` | Trámite de la CLC: relaciones de envío entre áreas (con la recepción de cada CLC) e historial de cada paso; el paso actual está en `ordenes_compra.clc_estado` |
+| `regidores` | Catálogo de regidores (título, nombre, cargo, comisión); `users.regidor_id` = de qué regidor es enlace (con `users.titulo` y `users.cargo` para los formatos) |
 | `proveedor_cuentas` | Cuentas bancarias adicionales (CLABE) de `proveedores` |
 | `vehiculos` | Padrón vehicular |
 | `corridas_saldo`, `saldos_mensuales` | Corrida de saldos de cada mes (automática o manual) y, por línea del presupuesto, el saldo corrido al mes con los movimientos del mes anterior con que se calculó |

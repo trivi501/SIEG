@@ -8,7 +8,7 @@ use RuntimeException;
 
 /**
  * Corre los saldos del presupuesto: lo que quedó disponible en el mes anterior se suma al mes.
- * Lo programa routes/console.php el día 1 de cada mes; también se puede correr a mano.
+ * Es manual (no se programa): desde el botón "Correr saldos" del ejercicio del gasto o con este comando.
  */
 class CorrerSaldos extends Command
 {
@@ -31,7 +31,7 @@ class CorrerSaldos extends Command
         $fecha = $mes ? now(SaldosMensuales::ZONA)->setDate((int) substr($mes, 0, 4), (int) substr($mes, 5, 2), 1) : now(SaldosMensuales::ZONA);
 
         try {
-            $corrida = $saldos->correr($fecha->year, $fecha->month, $this->option('mes') || $this->option('forzar') ? 'manual' : 'automatica', null, (bool) $this->option('forzar'));
+            $corrida = $saldos->correr($fecha->year, $fecha->month, 'manual', null, (bool) $this->option('forzar'));
         } catch (RuntimeException $e) {
             $this->warn($e->getMessage());
 

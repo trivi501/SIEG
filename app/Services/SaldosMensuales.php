@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CorridaSaldo;
+use App\Models\EgresoRequisicion;
 use App\Models\ModificacionPresupuestal;
 use App\Models\PresupuestoEgreso;
 use App\Models\SaldoMensual;
@@ -20,6 +21,8 @@ use RuntimeException;
  * - Modificado del mes: modificaciones autorizadas, en el periodo (mes) que indica cada lado (origen /
  *   destino); las anteriores al periodo, en el mes en que se autorizaron.
  * - Comprometido del mes: requisiciones con suficiencia validada en el mes (fecha de suficiencia).
+ *   Al cancelarse una requisición comprometida, su importe se libera en el mes de la cancelación
+ *   (el mes vigente en ese momento), no en el mes en que se comprometió.
  * - Saldo corrido: lo que quedó disponible el mes anterior (puede ser negativo si se excedió).
  *   Al "correr saldos" (el día 1 de cada mes) se congela en saldos_mensuales; los meses sin
  *   corrida se calculan con los movimientos. Enero empieza en cero.
@@ -83,14 +86,24 @@ final class SaldosMensuales
                 ->where('r.suficiencia', 1)
                 ->where('r.id_cat_egreso_requisicion_estado', '!=', 4)
                 ->whereNotNull('r.suficiencia_fecha')
-                ->get(['u.clave', 'd.fuente', 'd.proyecto', 'd.partida', 'r.suficiencia_fecha', DB::raw('COALESCE(d.total, d.sub_total, 0) as monto')]);
+                ->get(['u.clave', 'd.fuente', 'd.proyecto', 'd.partida', 'r.suficiencia_fecha', 'r.id_cat_egreso_requisicion_estado as estado', 'r.cancelada_at', DB::raw('COALESCE(d.total, d.sub_total, 0) as monto')]);
 
             foreach ($conceptos as $c) {
-                // suficiencia_fecha la escribe Laravel (UTC); el mes se toma en hora local.
+                $clave = PresupuestoService::clave($c->clave, $c->fuente, $c->proyecto, $c->partida);
+                // suficiencia_fecha y cancelada_at las escribe Laravel (UTC); el mes se toma en hora local.
                 $fecha = Carbon::parse($c->suficiencia_fecha, 'UTC')->setTimezone(self::ZONA);
 
                 if ($fecha->year === $año) {
-                    $sumar(PresupuestoService::clave($c->clave, $c->fuente, $c->proyecto, $c->partida), $fecha->month, 'comprometido', (float) $c->monto);
+                    $sumar($clave, $fecha->month, 'comprometido', (float) $c->monto);
+                }
+
+                // Cancelada: lo comprometido regresa al disponible del mes en que se canceló.
+                if ((int) $c->estado === EgresoRequisicion::CANCELADA) {
+                    $cancelada = $c->cancelada_at ? Carbon::parse($c->cancelada_at, 'UTC')->setTimezone(self::ZONA) : $fecha;
+
+                    if ($cancelada->year === $año) {
+                        $sumar($clave, $cancelada->month, 'comprometido', -(float) $c->monto);
+                    }
                 }
             }
         }

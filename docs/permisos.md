@@ -29,9 +29,12 @@ Los permisos de los **catálogos** no se escriben a mano: el comando los toma de
 
 | Módulo | Permisos |
 |---|---|
+| Bandeja de Recursos Materiales | `recursos-materiales-index` (solo Admin y el rol Recursos Materiales). Los proveedores (`proveedores-*`, catálogo) también son solo de Recursos Materiales |
+| Ejercicio y control del gasto | `gasto-index` (solo Admin y Control Presupuestal; también muestra los montos del presupuesto en el Panel) |
 | Presupuesto | `presupuesto-index`, `-create` (nueva partida), `-edit`, `-import`, `-delete`, `presupuesto-correr-saldos` (correr saldos a mano) |
-| Requisiciones | `requisiciones-index`, `-create`, `-edit`, `-delete`, `requisiciones-suficiencia`, `requisiciones-clc` (el área genera la CLC de una orden con factura), `requisiciones-extemporaneas` (Subdirección Administrativa: autoriza las capturadas fuera del periodo) |
-| Órdenes de compra y proveedores | `ordenes-compra-create`, `ordenes-compra-pagar` (registrar pago), `proveedores-index`, `-create`, `-edit`, `-delete`, `-import` |
+| Requisiciones | `requisiciones-index`, `-create`, `-edit`, `-delete`, `requisiciones-suficiencia`, `requisiciones-clc` (el área genera la CLC de una orden con factura), `requisiciones-extemporaneas` (Subdirección Administrativa: autoriza las capturadas fuera del periodo), `requisiciones-fecha` (cambia la fecha de trámite de cualquier requisición; el enlace de cada secretaría puede cambiar la de las suyas con `requisiciones-create`), `requisiciones-cotizar` (Recursos Materiales: *Recibido – Iniciar cotización* y editar la cotización), `requisiciones-cancelar` (cancela cualquier requisición antes de la orden de compra; el enlace cancela las suyas mientras estén pendientes o rechazadas) |
+| Trámite de CLC | `clc-index` (ver la bandeja), `clc-recursos-materiales`, `clc-control-presupuestal`, `clc-sindicatura`, `clc-egresos` (actuar como cada área); el pago es `ordenes-compra-pagar` |
+| Órdenes de compra y proveedores | `ordenes-compra-create`, `ordenes-compra-pagar` (registrar pago), `ordenes-compra-fecha` (corregir la fecha de la orden), `proveedores-index`, `-create`, `-edit`, `-delete`, `-import` |
 | Catálogos | `catalogos-{slug}-index`, `-create`, `-edit`, `-delete` (dar de baja / reactivar), `-import`; p. ej. `catalogos-vehiculos-edit`. Slugs en [Módulos](modulos.md#catálogos-generales) |
 | Bitácora de auditoría | `auditoria-index` |
 | Modificaciones presupuestales | `modificaciones-index`, `modificaciones-create`, `modificaciones-autorizar` |
@@ -47,9 +50,13 @@ Crear estos roles en **Administración → Roles**:
 | Rol | Permisos |
 |---|---|
 | Área solicitante | `requisiciones-index`, `requisiciones-create`, `requisiciones-edit`, `requisiciones-clc`, `modificaciones-index`, `modificaciones-create` |
-| Recursos Materiales | `requisiciones-index`, `requisiciones-edit`, `requisiciones-suficiencia`, `ordenes-compra-create`, `proveedores-*` |
-| Jefe de Control Presupuestal | `modificaciones-index`, `modificaciones-autorizar` |
+| Recursos Materiales | `requisiciones-index`, `requisiciones-edit`, `requisiciones-suficiencia`, `requisiciones-fecha`, `ordenes-compra-create`, `ordenes-compra-fecha`, `proveedores-*` |
+| Jefe de Control Presupuestal | `modificaciones-index`, `modificaciones-autorizar`, `requisiciones-index`, `requisiciones-fecha`, `ordenes-compra-fecha` |
 | Subdirección Administrativa (Adquisiciones) | `requisiciones-index`, `requisiciones-extemporaneas` |
+| Sindicatura | `clc-index`, `clc-sindicatura` |
+| Egresos | `clc-index`, `clc-egresos`, `ordenes-compra-pagar` |
+
+Estos roles del trámite (y Área solicitante, Recursos Materiales y Control Presupuestal con sus permisos) los crea `php artisan clc:usuarios-prueba --solo-roles`; sin `--solo-roles` crea además un usuario de prueba por rol. **Control Presupuestal** (además de Admin) administra usuarios, roles y permisos (`users-*`, `roles-*`, `permisos-index`).
 | Control Vehicular | `catalogos-vehiculos-*` |
 | Consulta de catálogos | `catalogos-*-index` de los catálogos que deba ver |
 

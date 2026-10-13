@@ -26,6 +26,8 @@ export interface PresupuestoEgreso {
     /** Importe total menos la suma de los meses (0 = la distribución cuadra). */
     diferencia?: number;
     /** Momentos del gasto de la línea (lista del presupuesto). */
+    modificado?: number;
+    vigente?: number;
     comprometido?: number;
     devengado?: number;
     pagado?: number;

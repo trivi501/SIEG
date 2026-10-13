@@ -26,13 +26,25 @@ class SyncPermissions extends Command
             // Presupuesto
             'presupuesto-index', 'presupuesto-create', 'presupuesto-edit', 'presupuesto-import', 'presupuesto-delete', 'presupuesto-correr-saldos',
 
+            // Ejercicio y control del gasto (solo Admin y Control Presupuestal)
+            'gasto-index',
+
+            // Bandeja de Recursos Materiales (Admin, Control Presupuestal y Recursos Materiales)
+            'recursos-materiales-index',
+
             // Requisiciones
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-delete', 'requisiciones-suficiencia',
             'requisiciones-clc', // el área genera la CLC cuando la orden de compra ya tiene factura
             'requisiciones-extemporaneas', // Subdirección Administrativa: autoriza las capturadas fuera del periodo
+            'requisiciones-fecha', // Recursos Materiales / Control Presupuestal: cambia la fecha de cualquier requisición
+            'requisiciones-cotizar', // Recursos Materiales: recibe la requisición, inicia y edita la cotización
+            'requisiciones-cancelar', // cancela cualquier requisición antes de la orden de compra
 
             // Órdenes de compra (Recursos Materiales)
-            'ordenes-compra-create', 'ordenes-compra-pagar',
+            'ordenes-compra-create', 'ordenes-compra-pagar', 'ordenes-compra-fecha',
+
+            // Trámite de CLC: ver la bandeja y actuar como cada área (el pago es ordenes-compra-pagar).
+            'clc-index', 'clc-recursos-materiales', 'clc-control-presupuestal', 'clc-sindicatura', 'clc-egresos',
 
             // Modificaciones presupuestales
             'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar',

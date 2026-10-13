@@ -27,7 +27,8 @@ class PresupuestoController extends Controller
 
     public function index(Request $request)
     {
-        $this->authorizeAdmin();
+        // Consulta: permiso presupuesto-index (Admin y Control Presupuestal); alta, edición, importación y
+        // corrida de saldos siguen siendo solo de Admin.
 
         $query = PresupuestoEgreso::query();
 
@@ -46,7 +47,7 @@ class PresupuestoController extends Controller
             $query->whereRaw("ABS(COALESCE(`IMPORTE_TOTAL`, 0) - ({$sumaMeses})) >= 0.005");
         }
 
-        // Momentos del gasto de cada línea (comprometido, devengado, pagado), por clave de línea.
+        // Modificado, vigente y momentos del gasto de cada línea (comprometido, devengado, pagado), por clave de línea.
         $momentos = app(PresupuestoService::class)->lineas()->keyBy('clave');
 
         return Inertia::render('presupuesto/index', [
@@ -56,6 +57,8 @@ class PresupuestoController extends Controller
                 return [
                     ...$linea->toArray(),
                     'diferencia' => DistribucionMensual::diferencia($linea->IMPORTE_TOTAL, $linea->getAttributes()) / 100,
+                    'modificado' => $saldos['modificado'] ?? 0,
+                    'vigente' => $saldos['vigente'] ?? (float) $linea->IMPORTE_TOTAL,
                     'comprometido' => $saldos['comprometido'] ?? 0,
                     'devengado' => $saldos['devengado'] ?? 0,
                     'pagado' => $saldos['pagado'] ?? 0,
@@ -297,7 +300,7 @@ class PresupuestoController extends Controller
 
             if ($col === null) {
                 $ordered = array_keys($map);
-                usort($ordered, fn($a, $b) => strlen($b) <=> strlen($a));
+                usort($ordered, fn ($a, $b) => strlen($b) <=> strlen($a));
                 foreach ($ordered as $key) {
                     if (mb_strpos($normalized, $key) !== false) {
                         $col = $map[$key];

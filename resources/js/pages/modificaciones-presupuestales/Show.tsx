@@ -1,17 +1,10 @@
-import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import { ArrowLeft, FileText } from 'lucide-react';
 import { useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import EstadoModificacionBadge from '@/components/estado-modificacion-badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
 import { etiquetaLinea, fechaLocal, money } from '@/lib/presupuesto';
 import type { LineaPresupuesto } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
@@ -40,17 +33,9 @@ export default function Show({
     const permisos =
         (usePage().props.userPermissions as string[] | undefined) ?? [];
     const [accion, setAccion] = useState<'autorizar' | 'rechazar' | null>(null);
-    const form = useForm({ observaciones: '' });
     const pendiente = modificacion.estado === 'pendiente';
     const importe = Number(modificacion.importe);
-
-    const resolver = (e: React.FormEvent) => {
-        e.preventDefault();
-        form.post(
-            `/modificaciones-presupuestales/${modificacion.id}/${accion}`,
-            { preserveScroll: true, onSuccess: () => setAccion(null) },
-        );
-    };
+    const aceptar = accion === 'autorizar';
 
     const periodo = (mes: number | null) =>
         mes ? ` · periodo ${meses[mes]}` : '';
@@ -256,21 +241,14 @@ export default function Show({
                             permisos.includes('modificaciones-autorizar') && (
                                 <>
                                     <Button
-                                        onClick={() => {
-                                            form.reset();
-                                            form.clearErrors();
-                                            setAccion('autorizar');
-                                        }}
+                                        className="bg-green-700 hover:bg-green-800"
+                                        onClick={() => setAccion('autorizar')}
                                     >
-                                        Autorizar (procede)
+                                        Aceptar (procede)
                                     </Button>
                                     <Button
                                         variant="destructive"
-                                        onClick={() => {
-                                            form.reset();
-                                            form.clearErrors();
-                                            setAccion('rechazar');
-                                        }}
+                                        onClick={() => setAccion('rechazar')}
                                     >
                                         Rechazar (no procede)
                                     </Button>
@@ -280,72 +258,63 @@ export default function Show({
                 </div>
             </div>
 
-            <Dialog
-                open={accion !== null}
-                onOpenChange={(o) => !o && setAccion(null)}
-            >
-                <DialogContent>
-                    <form onSubmit={resolver} className="space-y-4">
-                        <DialogHeader>
-                            <DialogTitle>
-                                {accion === 'autorizar'
-                                    ? '¿Autorizar la modificación?'
-                                    : '¿Rechazar la modificación?'}
-                            </DialogTitle>
-                            <DialogDescription>
-                                {accion === 'autorizar'
-                                    ? `Se aplicará al presupuesto: ${money(importe)} ${modificacion.tipo === 'traspaso' ? 'pasan del origen al destino' : modificacion.tipo === 'reduccion' ? 'se reducen del origen' : 'se amplían en el destino'}.`
-                                    : 'La solicitud quedará como "no procede" y el presupuesto no cambia.'}
-                            </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium">
-                                Observaciones
-                                {accion === 'rechazar' ? ' (motivo)' : ''}
-                            </label>
-                            <textarea
-                                value={form.data.observaciones}
-                                onChange={(e) =>
-                                    form.setData(
-                                        'observaciones',
-                                        e.target.value,
-                                    )
-                                }
-                                rows={3}
-                                className="block w-full rounded-md border-input px-3 py-2 text-sm shadow-sm"
-                                required={accion === 'rechazar'}
-                            />
-                            {form.errors.observaciones && (
-                                <p className="text-sm text-destructive">
-                                    {form.errors.observaciones}
-                                </p>
-                            )}
-                        </div>
-                        <DialogFooter>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => setAccion(null)}
-                            >
-                                Cancelar
-                            </Button>
-                            <Button
-                                type="submit"
-                                variant={
-                                    accion === 'rechazar'
-                                        ? 'destructive'
-                                        : 'default'
-                                }
-                                disabled={form.processing}
-                            >
-                                {accion === 'autorizar'
-                                    ? 'Autorizar'
-                                    : 'Rechazar'}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
+            <ConfirmarAccion
+                abierto={accion !== null}
+                onCerrar={() => setAccion(null)}
+                titulo={`${aceptar ? 'Aceptar' : 'Rechazar'} modificación ${modificacion.folio_completo}`}
+                descripcion={
+                    aceptar
+                        ? `Se aplica al presupuesto de inmediato: ${money(importe)} ${modificacion.tipo === 'traspaso' ? 'pasan del emisor al receptor' : modificacion.tipo === 'reduccion' ? 'se reducen del emisor' : 'se amplían en el receptor'}.`
+                        : 'La solicitud queda como "no procede" y el presupuesto no cambia.'
+                }
+                tono={aceptar ? 'exito' : 'peligro'}
+                encabezado={{
+                    titulo: money(importe),
+                    subtitulo: tipos[modificacion.tipo] ?? modificacion.tipo,
+                }}
+                datos={[
+                    ...(modificacion.origen_descripcion
+                        ? [
+                              {
+                                  etiqueta: `Emisor (disminuye)${periodo(modificacion.origen_mes)}`,
+                                  valor: modificacion.origen_descripcion,
+                                  ancho: true,
+                              },
+                          ]
+                        : []),
+                    ...(modificacion.destino_descripcion
+                        ? [
+                              {
+                                  etiqueta: `Receptor (aumenta)${periodo(modificacion.destino_mes)}`,
+                                  valor: modificacion.destino_descripcion,
+                                  ancho: true,
+                              },
+                          ]
+                        : []),
+                ]}
+                cambio={{
+                    de: 'Pendiente',
+                    a: aceptar ? 'Autorizada' : 'Rechazada',
+                }}
+                motivo={
+                    aceptar
+                        ? { etiqueta: 'Observaciones (opcional)' }
+                        : {
+                              etiqueta: 'Motivo por el que no procede',
+                              requerido: true,
+                          }
+                }
+                textoConfirmar={
+                    aceptar ? 'Aceptar modificación' : 'Rechazar modificación'
+                }
+                onConfirmar={(observaciones, op) =>
+                    router.post(
+                        `/modificaciones-presupuestales/${modificacion.id}/${accion}`,
+                        { observaciones },
+                        op,
+                    )
+                }
+            />
         </>
     );
 }

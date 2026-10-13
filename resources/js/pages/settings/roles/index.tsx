@@ -1,14 +1,11 @@
 import { Head, Link, router } from '@inertiajs/react';
 import { Plus, Shield, Pencil, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import Heading from '@/components/heading';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
     TableBody,
@@ -41,10 +38,10 @@ interface PaginatedData<T> {
 }
 
 export default function Index({ roles }: { roles: PaginatedData<Role> }) {
+    const [borrar, setBorrar] = useState<Role | null>(null);
+
     const handleDelete = (role: Role) => {
-        if (confirm(`Are you sure you want to delete the role "${role.name}"?`)) {
-            router.delete(`/settings/roles/${role.id}`);
-        }
+        setBorrar(role);
     };
 
     return (
@@ -77,13 +74,18 @@ export default function Index({ roles }: { roles: PaginatedData<Role> }) {
                                     <TableHead>Name</TableHead>
                                     <TableHead>Guard</TableHead>
                                     <TableHead>Permissions</TableHead>
-                                    <TableHead className="w-[100px]">Actions</TableHead>
+                                    <TableHead className="w-[100px]">
+                                        Actions
+                                    </TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {roles.data.length === 0 && (
                                     <TableRow>
-                                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                        <TableCell
+                                            colSpan={4}
+                                            className="text-center text-muted-foreground"
+                                        >
                                             No roles found.
                                         </TableCell>
                                     </TableRow>
@@ -99,14 +101,21 @@ export default function Index({ roles }: { roles: PaginatedData<Role> }) {
                                         <TableCell>{role.guard_name}</TableCell>
                                         <TableCell>
                                             <div className="flex flex-wrap gap-1">
-                                                {role.permissions.slice(0, 5).map((perm) => (
-                                                    <Badge key={perm} variant="secondary">
-                                                        {perm}
-                                                    </Badge>
-                                                ))}
+                                                {role.permissions
+                                                    .slice(0, 5)
+                                                    .map((perm) => (
+                                                        <Badge
+                                                            key={perm}
+                                                            variant="secondary"
+                                                        >
+                                                            {perm}
+                                                        </Badge>
+                                                    ))}
                                                 {role.permissions_count > 5 && (
                                                     <Badge variant="outline">
-                                                        +{role.permissions_count - 5}
+                                                        +
+                                                        {role.permissions_count -
+                                                            5}
                                                     </Badge>
                                                 )}
                                             </div>
@@ -118,14 +127,18 @@ export default function Index({ roles }: { roles: PaginatedData<Role> }) {
                                                     size="icon"
                                                     asChild
                                                 >
-                                                    <Link href={`/settings/roles/${role.id}/edit`}>
+                                                    <Link
+                                                        href={`/settings/roles/${role.id}/edit`}
+                                                    >
                                                         <Pencil className="h-4 w-4" />
                                                     </Link>
                                                 </Button>
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    onClick={() => handleDelete(role)}
+                                                    onClick={() =>
+                                                        handleDelete(role)
+                                                    }
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -145,7 +158,11 @@ export default function Index({ roles }: { roles: PaginatedData<Role> }) {
                                         preserveScroll
                                         className={`inline-flex items-center rounded px-3 py-1 text-sm ${link.active ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'} ${!link.url ? 'pointer-events-none opacity-50' : ''}`}
                                     >
-                                        <span dangerouslySetInnerHTML={{ __html: link.label }} />
+                                        <span
+                                            dangerouslySetInnerHTML={{
+                                                __html: link.label,
+                                            }}
+                                        />
                                     </Link>
                                 ))}
                             </div>
@@ -153,6 +170,25 @@ export default function Index({ roles }: { roles: PaginatedData<Role> }) {
                     </CardContent>
                 </Card>
             </div>
+            <ConfirmarAccion
+                abierto={borrar !== null}
+                onCerrar={() => setBorrar(null)}
+                titulo="Eliminar rol"
+                descripcion="Los usuarios que lo tengan perderán sus permisos. Queda registrado en la bitácora de auditoría."
+                tono="peligro"
+                encabezado={{ titulo: borrar?.name, subtitulo: undefined }}
+                datos={[
+                    {
+                        etiqueta: 'Permisos',
+                        valor: borrar?.permissions_count ?? 0,
+                    },
+                ]}
+                textoConfirmar="Eliminar rol"
+                textoProcesando="Eliminando..."
+                onConfirmar={(_, op) =>
+                    router.delete(`/settings/roles/${borrar?.id}`, op)
+                }
+            />
         </>
     );
 }

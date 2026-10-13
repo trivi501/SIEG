@@ -1,5 +1,7 @@
 import { Head, Link, useForm } from '@inertiajs/react';
 import { ArrowLeft } from 'lucide-react';
+import AvisoCapturaModificaciones from '@/components/aviso-captura-modificaciones';
+import type { CapturaModificaciones } from '@/components/aviso-captura-modificaciones';
 import SearchableSelect from '@/components/searchable-select';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -39,53 +41,36 @@ function Saldo({
         return null;
     }
 
-    const despues = linea.disponible + signo * importe;
-    const despuesMes =
-        disponibleMes === undefined
-            ? undefined
-            : disponibleMes + signo * importe;
+    const actual = disponibleMes ?? 0;
+    const despues = actual + signo * importe;
+    const sinSuficiencia = signo === -1 && despues < 0;
 
     return (
-        <div className="mt-2 grid grid-cols-3 gap-2 rounded-md bg-muted/40 p-2 text-xs">
-            {disponibleMes !== undefined && despuesMes !== undefined && (
-                <>
-                    <div className="col-span-1">
-                        <span className="text-muted-foreground">Periodo:</span>{' '}
-                        <span className="capitalize">{nombreMes}</span>
-                    </div>
-                    <div>
-                        <span className="text-muted-foreground">
-                            Disponible del mes:
-                        </span>{' '}
-                        {money(disponibleMes)}
-                    </div>
-                    <div>
-                        <span className="text-muted-foreground">
-                            Del mes después:
-                        </span>{' '}
-                        <span
-                            className={
-                                despuesMes < 0
-                                    ? 'font-semibold text-destructive'
-                                    : 'font-semibold'
-                            }
-                        >
-                            {money(despuesMes)}
-                        </span>
-                    </div>
-                </>
-            )}
+        <div
+            className={`mt-2 grid grid-cols-2 gap-2 rounded-md p-2 text-xs sm:grid-cols-4 ${sinSuficiencia ? 'border border-destructive/40 bg-destructive/5' : 'bg-muted/40'}`}
+        >
             <div>
-                <span className="text-muted-foreground">Vigente:</span>{' '}
-                {money(linea.vigente)}
+                <span className="text-muted-foreground">Fuente:</span>{' '}
+                {linea.fuente}{' '}
+                <span className="text-muted-foreground">
+                    {linea.nombre_fuente}
+                </span>
             </div>
             <div>
-                <span className="text-muted-foreground">Disponible:</span>{' '}
-                {money(linea.disponible)}
+                <span className="text-muted-foreground">Periodo:</span>{' '}
+                <span className="capitalize">{nombreMes}</span>
             </div>
             <div>
                 <span className="text-muted-foreground">
-                    Disponible después:
+                    Disponible del periodo:
+                </span>{' '}
+                <span className={actual < 0 ? 'text-destructive' : ''}>
+                    {money(actual)}
+                </span>
+            </div>
+            <div>
+                <span className="text-muted-foreground">
+                    {signo === -1 ? 'Le queda:' : 'Queda con:'}
                 </span>{' '}
                 <span
                     className={
@@ -97,10 +82,17 @@ function Saldo({
                     {money(despues)}
                 </span>
             </div>
+            {sinSuficiencia && (
+                <div className="col-span-full font-medium text-destructive">
+                    Sin suficiencia: el emisor solo tiene {money(actual)}{' '}
+                    disponibles en{' '}
+                    <span className="capitalize">{nombreMes}</span>; faltan{' '}
+                    {money(-despues)}.
+                </div>
+            )}
         </div>
     );
 }
-
 export default function Create({
     lineas,
     tipos,
@@ -110,7 +102,9 @@ export default function Create({
     meses,
     mesActual,
     disponiblesMes,
+    captura,
 }: {
+    captura: CapturaModificaciones;
     meses: Record<string, string>;
     mesActual: number;
     disponiblesMes: Record<string, Record<string, number>>;
@@ -140,21 +134,58 @@ export default function Create({
     const usaDestino = data.tipo === 'traspaso' || data.tipo === 'ampliacion';
     const multiUnidad = new Set(lineas.map((l) => l.unidad_clave)).size > 1;
 
-    const opcion = (l: Required<LineaPresupuesto>) => ({
+    const disponibleEn = (clave: string, mes: string) =>
+        disponiblesMes[clave]?.[mes] ?? 0;
+    const opcion = (l: Required<LineaPresupuesto>, mes: string) => ({
         value: l.clave,
         label: `${multiUnidad ? `${l.unidad} · ` : ''}${etiquetaLinea(l)}`,
-        hint: `Disp. ${money(l.disponible)}`,
+        hint: `Disp. ${meses[mes] ?? ''} ${money(disponibleEn(l.clave, mes))}`,
     });
-    const opcionesOrigen = lineas
-        .filter((l) => l.disponible > 0 && l.clave !== data.destino)
-        .map(opcion);
-    const opcionesDestino = lineas
-        .filter((l) => l.clave !== data.origen)
-        .map(opcion);
 
     const origen = lineas.find((l) => l.clave === data.origen);
     const destino = lineas.find((l) => l.clave === data.destino);
     const importe = parseFloat(data.importe) || 0;
+
+    // Traspaso: emisor y receptor de la misma fuente de financiamiento.
+    const esTraspaso = data.tipo === 'traspaso';
+    const opcionesOrigen = lineas
+        .filter(
+            (l) =>
+                disponibleEn(l.clave, data.origen_mes) > 0 &&
+                l.clave !== data.destino &&
+                (!esTraspaso ||
+                    !requisicion ||
+                    !destino ||
+                    l.fuente === destino.fuente),
+        )
+        .map((l) => opcion(l, data.origen_mes));
+    const opcionesDestino = lineas
+        .filter(
+            (l) =>
+                l.clave !== data.origen &&
+                (!esTraspaso || !origen || l.fuente === origen.fuente),
+        )
+        .map((l) => opcion(l, data.destino_mes));
+
+    const cambiarOrigen = (clave: string) => {
+        const nuevo = lineas.find((l) => l.clave === clave);
+        setData((d) => ({
+            ...d,
+            origen: clave,
+            destino:
+                esTraspaso &&
+                nuevo &&
+                destino &&
+                destino.fuente !== nuevo.fuente
+                    ? ''
+                    : d.destino,
+        }));
+    };
+
+    const sinSuficiencia =
+        usaOrigen &&
+        !!origen &&
+        importe > disponibleEn(origen.clave, data.origen_mes);
 
     const selectorMes = (
         campo: 'origen_mes' | 'destino_mes',
@@ -203,6 +234,7 @@ export default function Create({
                 </div>
 
                 <form onSubmit={submit} className="max-w-4xl space-y-6">
+                    <AvisoCapturaModificaciones captura={captura} />
                     {requisicion && (
                         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                             Relacionada con la requisición{' '}
@@ -211,6 +243,12 @@ export default function Create({
                             {destinoSugerido &&
                                 ' Se propone como destino la partida que no alcanzó y como importe lo que le falta.'}
                         </div>
+                    )}
+
+                    {errors.tipo && (
+                        <p className="text-sm text-destructive">
+                            {errors.tipo}
+                        </p>
                     )}
 
                     <Card>
@@ -256,7 +294,7 @@ export default function Create({
                                     </label>
                                     <SearchableSelect
                                         value={data.origen}
-                                        onChange={(v) => setData('origen', v)}
+                                        onChange={cambiarOrigen}
                                         options={opcionesOrigen}
                                         showValue={false}
                                         panelWidth={760}
@@ -301,6 +339,13 @@ export default function Create({
                                     {errors.destino && (
                                         <p className="mt-1 text-sm text-destructive">
                                             {errors.destino}
+                                        </p>
+                                    )}
+                                    {esTraspaso && origen && (
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                            Solo partidas de la fuente{' '}
+                                            {origen.fuente}{' '}
+                                            {origen.nombre_fuente}.
                                         </p>
                                     )}
                                     {selectorMes(
@@ -374,7 +419,19 @@ export default function Create({
                     </Card>
 
                     <div className="flex items-center gap-4">
-                        <Button type="submit" disabled={processing}>
+                        <Button
+                            type="submit"
+                            disabled={
+                                processing || sinSuficiencia || !captura.abierta
+                            }
+                            title={
+                                !captura.abierta
+                                    ? 'La captura de este mes está cerrada'
+                                    : sinSuficiencia
+                                      ? 'El emisor no tiene suficiencia en el periodo'
+                                      : undefined
+                            }
+                        >
                             {processing
                                 ? 'Guardando...'
                                 : 'Registrar solicitud'}

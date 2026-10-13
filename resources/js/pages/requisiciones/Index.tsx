@@ -1,6 +1,7 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Plus, Eye, Pencil, Download, Search, Send, X } from 'lucide-react';
 import { useRef, useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,9 @@ export default function Index({
     }[];
     filters: Record<string, string>;
 }) {
+    const permisos =
+        (usePage().props.userPermissions as string[] | undefined) ?? [];
+    const [enviarRm, setenviarRm] = useState<Requisicion | null>(null);
     const [f, setF] = useState({
         folio: filters?.folio ?? '',
         folio_completo: filters?.folio_completo ?? '',
@@ -134,11 +138,13 @@ export default function Index({
                 <div className="mb-4 flex items-center justify-between">
                     <h3 className="text-lg font-medium">Requisiciones</h3>
                     <div className="flex items-center gap-2">
-                        <Button variant="outline" asChild>
-                            <Link href="/requisiciones/gasto">
-                                Ejercicio y control del gasto
-                            </Link>
-                        </Button>
+                        {permisos.includes('gasto-index') && (
+                            <Button variant="outline" asChild>
+                                <Link href="/requisiciones/gasto">
+                                    Ejercicio y control del gasto
+                                </Link>
+                            </Button>
+                        )}
                         <Button asChild>
                             <Link href="/requisiciones/crear">
                                 <Plus className="mr-2 h-4 w-4" />
@@ -336,7 +342,15 @@ export default function Index({
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex flex-wrap items-center gap-1">
-                                                <Badge variant="secondary">
+                                                <Badge
+                                                    variant="secondary"
+                                                    className={
+                                                        req.id_cat_egreso_requisicion_estado ===
+                                                        12
+                                                            ? 'bg-red-100 text-red-800'
+                                                            : ''
+                                                    }
+                                                >
                                                     {req
                                                         .cat_egreso_requisicion_estado
                                                         ?.descripcion ?? '—'}
@@ -424,16 +438,7 @@ export default function Index({
                                                         variant="outline"
                                                         title="Enviar a Recursos Materiales"
                                                         onClick={() =>
-                                                            confirm(
-                                                                `¿Enviar ${req.folio_completo} a Recursos Materiales?`,
-                                                            ) &&
-                                                            router.post(
-                                                                `/requisiciones/${req.id_tb_egreso_requisicion}/recursos-materiales`,
-                                                                {},
-                                                                {
-                                                                    preserveScroll: true,
-                                                                },
-                                                            )
+                                                            setenviarRm(req)
                                                         }
                                                     >
                                                         <Send className="mr-1 h-4 w-4" />{' '}
@@ -466,6 +471,35 @@ export default function Index({
                     </CardContent>
                 </Card>
             </div>
+            <ConfirmarAccion
+                abierto={enviarRm !== null}
+                onCerrar={() => setenviarRm(null)}
+                titulo="Enviar a Recursos Materiales"
+                descripcion="Recursos Materiales la recibe para cotizarla y validar la suficiencia presupuestal."
+                tono="info"
+                encabezado={{
+                    titulo: enviarRm?.folio_completo,
+                    subtitulo: enviarRm?.cat_egreso_unidad_administrativa
+                        ? `${enviarRm.cat_egreso_unidad_administrativa.clave} ${enviarRm.cat_egreso_unidad_administrativa.nombre}`
+                        : undefined,
+                }}
+                datos={[
+                    {
+                        etiqueta: 'Concepto',
+                        valor: enviarRm?.observaciones || '—',
+                        ancho: true,
+                    },
+                ]}
+                cambio={{ de: 'Aprobada', a: 'En Recursos Materiales' }}
+                textoConfirmar="Enviar a Recursos Materiales"
+                onConfirmar={(_, op) =>
+                    router.post(
+                        `/requisiciones/${enviarRm?.id_tb_egreso_requisicion}/recursos-materiales`,
+                        {},
+                        op,
+                    )
+                }
+            />
         </>
     );
 }

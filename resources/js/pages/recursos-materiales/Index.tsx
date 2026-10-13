@@ -1,6 +1,7 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Eye, Pencil, CheckCircle, FileText, Search, X } from 'lucide-react';
 import { useRef, useState } from 'react';
+import ConfirmarAccion from '@/components/confirmar-accion';
 import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,10 @@ export default function Index({
     }[];
     filters?: Record<string, string>;
 }) {
+    const cotiza = (
+        (usePage().props.userPermissions as string[] | undefined) ?? []
+    ).includes('requisiciones-cotizar');
+    const [recibir, setrecibir] = useState<Requisicion | null>(null);
     const [f, setF] = useState({
         folio_completo: filters?.folio_completo ?? '',
         concepto: filters?.concepto ?? '',
@@ -103,17 +108,6 @@ export default function Index({
             clearTimeout(espera.current);
             aplicar(f);
         }
-    };
-
-    const handleRecibido = (id: number) => {
-        router.post(
-            `/requisiciones/${id}/recibido`,
-            {},
-            {
-                preserveState: true,
-                preserveScroll: true,
-            },
-        );
     };
 
     const estadoColor = (estadoId: number) => {
@@ -331,20 +325,19 @@ export default function Index({
                                                         <Eye className="h-4 w-4" />
                                                     </Link>
                                                 </Button>
-                                                {req.id_cat_egreso_requisicion_estado ===
-                                                    5 && (
-                                                    <Button
-                                                        size="sm"
-                                                        onClick={() =>
-                                                            handleRecibido(
-                                                                req.id_tb_egreso_requisicion,
-                                                            )
-                                                        }
-                                                    >
-                                                        <CheckCircle className="mr-1 h-4 w-4" />{' '}
-                                                        Recibido
-                                                    </Button>
-                                                )}
+                                                {cotiza &&
+                                                    req.id_cat_egreso_requisicion_estado ===
+                                                        5 && (
+                                                        <Button
+                                                            size="sm"
+                                                            onClick={() =>
+                                                                setrecibir(req)
+                                                            }
+                                                        >
+                                                            <CheckCircle className="mr-1 h-4 w-4" />{' '}
+                                                            Recibido
+                                                        </Button>
+                                                    )}
                                                 {req.id_cat_egreso_requisicion_estado ===
                                                     7 && (
                                                     <Button size="sm" asChild>
@@ -373,8 +366,8 @@ export default function Index({
                                                 )}
                                                 {req.id_cat_egreso_requisicion_estado ===
                                                     6 &&
-                                                    req.suficiencia !==
-                                                        true && (
+                                                    req.suficiencia !== true &&
+                                                    cotiza && (
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
@@ -397,6 +390,34 @@ export default function Index({
                     </CardContent>
                 </Card>
             </div>
+            <ConfirmarAccion
+                abierto={recibir !== null}
+                onCerrar={() => setrecibir(null)}
+                titulo="Recibir e iniciar cotización"
+                descripcion="Recursos Materiales recibe la requisición y comienza a capturar los precios."
+                tono="info"
+                encabezado={{
+                    titulo: recibir?.folio_completo,
+                    subtitulo:
+                        recibir?.cat_egreso_unidad_administrativa?.nombre,
+                }}
+                datos={[
+                    {
+                        etiqueta: 'Concepto',
+                        valor: recibir?.observaciones || '—',
+                        ancho: true,
+                    },
+                ]}
+                cambio={{ de: 'En Recursos Materiales', a: 'En cotización' }}
+                textoConfirmar="Recibido, iniciar cotización"
+                onConfirmar={(_, op) =>
+                    router.post(
+                        `/requisiciones/${recibir?.id_tb_egreso_requisicion}/recibido`,
+                        {},
+                        op,
+                    )
+                }
+            />
         </>
     );
 }

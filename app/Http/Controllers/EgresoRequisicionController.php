@@ -2,45 +2,54 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CorridaSaldo;
 use App\Models\EgresoRequisicion;
-use App\Models\EgresoRequisicionDetalle;
 use App\Models\EgresoRequisicionBitacora;
+use App\Models\EgresoRequisicionDetalle;
 use App\Models\EgresoRequisicionEstado;
 use App\Models\EgresoUnidadAdministrativa;
 use App\Models\EjercicioFiscal;
+use App\Models\ModificacionPresupuestal;
 use App\Models\PresupuestoEgreso;
 use App\Models\Proveedor;
-use App\Models\ModificacionPresupuestal;
-use App\Models\CorridaSaldo;
 use App\Services\ExcelGasto;
-use App\Services\SaldosMensuales;
 use App\Services\PresupuestoService;
+use App\Services\SaldosMensuales;
+use App\Services\TramiteClc;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
-use Barryvdh\DomPDF\Facade\Pdf;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class EgresoRequisicionController extends Controller
 {
     /**
-     * Ids de cat_egreso_unidad_administrativa visibles para el usuario: null (todas) si es Admin;
+     * Ids de cat_egreso_unidad_administrativa visibles para el usuario: null (todas) si es Admin o Control Presupuestal;
      * si no, la de su secretaría o dirección (en todos los años); [] si no tiene asignada.
      */
     private function unidadesVisibles($user, bool $isAdmin): ?array
     {
-        if ($isAdmin) {
+        // Admin y Control Presupuestal ven todas; las áreas, solo las de su unidad.
+        if ($isAdmin || self::veTodas($user)) {
             return null;
         }
 
         return EgresoUnidadAdministrativa::idsMismaClave($user->id_cat_egreso_unidad_administrativa);
     }
 
+    /** Admin o Control Presupuestal (autoriza modificaciones): ve y trabaja las requisiciones de todas las áreas. */
+    private static function veTodas($user): bool
+    {
+        return PresupuestoService::clavesUnidadVisibles($user) === null;
+    }
+
     public function index(Request $request)
     {
         $user = auth()->user();
-        $isAdmin = $user->hasRole(['Super Admin', 'Admin']);
+        $isAdmin = self::veTodas($user);
 
         $query = EgresoRequisicion::with(['catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa:id_cat_egreso_unidad_administrativa,clave,nombre', 'ordenCompra:id,id_tb_egreso_requisicion,folio_completo,xml_uuid']);
 
@@ -79,7 +88,7 @@ class EgresoRequisicionController extends Controller
     public function create()
     {
         $user = auth()->user();
-        $isAdmin = $user->hasRole(['Super Admin', 'Admin']);
+        $isAdmin = self::veTodas($user);
 
         $unidadesQuery = EgresoUnidadAdministrativa::where('activo', 1);
         $idsVisibles = $this->unidadesVisibles($user, $isAdmin);
@@ -87,7 +96,7 @@ class EgresoRequisicionController extends Controller
             $unidadesQuery->whereIn('id_cat_egreso_unidad_administrativa', $idsVisibles);
         }
         $unidades = $unidadesQuery->orderBy('nombre')->get(['id_cat_egreso_unidad_administrativa', 'clave', 'nombre']);
-        $unidadDefault = !$isAdmin ? $unidades->first()?->id_cat_egreso_unidad_administrativa : null;
+        $unidadDefault = ! $isAdmin ? $unidades->first()?->id_cat_egreso_unidad_administrativa : null;
 
         $hoy = now('America/Mexico_City');
         [$inicio, $fin] = EjercicioFiscal::periodoCaptura($hoy->year);
@@ -211,13 +220,13 @@ class EgresoRequisicionController extends Controller
                 continue;
             }
             $clave = PresupuestoService::clave($unidad?->clave, $fila['fuente'] ?? null, $fila['proyecto'] ?? null, $fila['partida'] ?? null);
-            if (!isset($existentes[$clave])) {
+            if (! isset($existentes[$clave])) {
                 $errores["filas.{$i}.partida"] = 'Selecciona una fuente / proyecto / partida del presupuesto de la unidad (concepto '.($i + 1).').';
             }
         }
 
         if ($errores) {
-            throw \Illuminate\Validation\ValidationException::withMessages($errores);
+            throw ValidationException::withMessages($errores);
         }
     }
 
@@ -227,7 +236,7 @@ class EgresoRequisicionController extends Controller
 
         $user = auth()->user();
         $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
-        if ($idsVisibles !== null && !in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
+        if ($idsVisibles !== null && ! in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
             abort(403, 'Esa unidad administrativa no pertenece a tu secretaría.');
         }
 
@@ -242,7 +251,7 @@ class EgresoRequisicionController extends Controller
 
         $maxFolio = EgresoRequisicion::where('año', date('Y'))->max('folio') ?? 0;
         $nuevoFolio = $maxFolio + 1;
-        $folioCompleto = $prefijo . '-' . str_pad($nuevoFolio, 4, '0', STR_PAD_LEFT);
+        $folioCompleto = $prefijo.'-'.str_pad($nuevoFolio, 4, '0', STR_PAD_LEFT);
 
         $newId = (EgresoRequisicion::max('id_tb_egreso_requisicion') ?? 0) + 1;
 
@@ -252,88 +261,90 @@ class EgresoRequisicionController extends Controller
         $extemporanea = ! EjercicioFiscal::enPeriodoDeCaptura(now('America/Mexico_City'));
 
         DB::transaction(function () use ($user, $validated, $newId, $folioCompleto, $nuevoFolio, $filasCalculadas, $totales, $extemporanea) {
-        $requisicion = EgresoRequisicion::create([
-            'id_tb_egreso_requisicion' => $newId,
-            'id_cat_egreso_requisicion_estado' => 1, // pendiente
-            'id_cat_egreso_solicitud_tipo' => 1,
-            'id_tb_egreso_presupuesto' => 1,
-            'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'],
-            'id_cat_area_x_nombre_y_puesto_Solicita' => 1,
-            'id_cat_area_x_nombre_y_puesto_Autoriza' => 1,
-            'id_tb_usuarios' => 1,
-            'id_user_laravel' => $user->id,
-            'id_tb_egreso_presupuesto_detalle' => null,
-            'id_tb_egreso_proveedor' => null,
-            'folio' => $nuevoFolio,
-            'año' => date('Y'),
-            'folio_completo' => $folioCompleto,
-            'solicitado' => $validated['fecha_tramite'],
-            'observaciones' => $validated['concepto'] ?? null,
-            'sub_total' => $totales['sub_total'],
-            'isr' => null,
-            'iva' => $totales['iva'],
-            'descuento' => 0,
-            'total' => $totales['total'],
-            'monto_requisicion' => $totales['total'],
-            'sub_direccion' => null,
-            'departamento' => null,
-            'beneficiario' => null,
-            'beneficiario_referencia' => null,
-            'extemporanea' => $extemporanea,
-        ]);
+            $requisicion = EgresoRequisicion::create([
+                'id_tb_egreso_requisicion' => $newId,
+                'id_cat_egreso_requisicion_estado' => 1, // pendiente
+                'id_cat_egreso_solicitud_tipo' => 1,
+                'id_tb_egreso_presupuesto' => 1,
+                'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'],
+                'id_cat_area_x_nombre_y_puesto_Solicita' => 1,
+                'id_cat_area_x_nombre_y_puesto_Autoriza' => 1,
+                'id_tb_usuarios' => 1,
+                'id_user_laravel' => $user->id,
+                'id_tb_egreso_presupuesto_detalle' => null,
+                'id_tb_egreso_proveedor' => null,
+                'folio' => $nuevoFolio,
+                'año' => date('Y'),
+                'folio_completo' => $folioCompleto,
+                'solicitado' => $validated['fecha_tramite'],
+                'observaciones' => $validated['concepto'] ?? null,
+                'sub_total' => $totales['sub_total'],
+                'isr' => null,
+                'iva' => $totales['iva'],
+                'descuento' => 0,
+                'total' => $totales['total'],
+                'monto_requisicion' => $totales['total'],
+                'sub_direccion' => null,
+                'departamento' => null,
+                'beneficiario' => null,
+                'beneficiario_referencia' => null,
+                'extemporanea' => $extemporanea,
+            ]);
 
-        // Create detalle records from filas
-        if (!empty($filasCalculadas)) {
-            $detalleId = (EgresoRequisicionDetalle::max('id_tb_egreso_requisicion_detalle') ?? 0) + 1;
-            foreach ($filasCalculadas as $fila) {
-                if (empty($fila['descripcion'])) continue;
-                EgresoRequisicionDetalle::create([
-                    'id_tb_egreso_requisicion_detalle' => $detalleId++,
-                    'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-                    'id_cat_egreso_producto' => 1,
-                    'cantidad' => $fila['cantidad'],
-                    'descripcion' => $fila['descripcion'] ?? '',
-                    'fuente' => $fila['fuente'] ?? null,
-                    'proyecto' => $fila['proyecto'] ?? null,
-                    'partida' => $fila['partida'] ?? null,
-                    'articulo' => $fila['descripcion'] ?? null,
-                    'precio_unitario' => $fila['precio_unitario'],
-                    'sub_total' => $fila['sub_total'],
-                    'iva' => $fila['iva'],
-                    'iva_factor' => $fila['iva_factor'],
-                    'descuento' => 0,
-                    'total' => $fila['total'],
-                    'id_tb_egreso_presupuesto_detalle' => null,
-                    'id_tb_egreso_presupuesto' => null,
-                ]);
+            // Create detalle records from filas
+            if (! empty($filasCalculadas)) {
+                $detalleId = (EgresoRequisicionDetalle::max('id_tb_egreso_requisicion_detalle') ?? 0) + 1;
+                foreach ($filasCalculadas as $fila) {
+                    if (empty($fila['descripcion'])) {
+                        continue;
+                    }
+                    EgresoRequisicionDetalle::create([
+                        'id_tb_egreso_requisicion_detalle' => $detalleId++,
+                        'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                        'id_cat_egreso_producto' => 1,
+                        'cantidad' => $fila['cantidad'],
+                        'descripcion' => $fila['descripcion'] ?? '',
+                        'fuente' => $fila['fuente'] ?? null,
+                        'proyecto' => $fila['proyecto'] ?? null,
+                        'partida' => $fila['partida'] ?? null,
+                        'articulo' => $fila['descripcion'] ?? null,
+                        'precio_unitario' => $fila['precio_unitario'],
+                        'sub_total' => $fila['sub_total'],
+                        'iva' => $fila['iva'],
+                        'iva_factor' => $fila['iva_factor'],
+                        'descuento' => 0,
+                        'total' => $fila['total'],
+                        'id_tb_egreso_presupuesto_detalle' => null,
+                        'id_tb_egreso_presupuesto' => null,
+                    ]);
+                }
             }
-        }
 
-        // Bitácora - creación
-        $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
-        EgresoRequisicionBitacora::create([
-            'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
-            'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-            'id_cat_egreso_requisicion_estado_anterior' => 1,
-            'id_cat_egreso_requisicion_estado_nuevo' => 1,
-            'id_tb_usuarios' => 1,
-            'observaciones' => $extemporanea
-                ? 'Requisición creada fuera del periodo de captura (extemporánea): requiere autorización de la Subdirección Administrativa.'
-                : 'Requisición creada.',
-        ]);
+            // Bitácora - creación
+            $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
+            EgresoRequisicionBitacora::create([
+                'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
+                'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                'id_cat_egreso_requisicion_estado_anterior' => 1,
+                'id_cat_egreso_requisicion_estado_nuevo' => 1,
+                'id_tb_usuarios' => 1,
+                'observaciones' => $extemporanea
+                    ? 'Requisición creada fuera del periodo de captura (extemporánea): requiere autorización de la Subdirección Administrativa.'
+                    : 'Requisición creada.',
+            ]);
         });
 
         return redirect()->route('requisiciones.index')->with(
             $extemporanea ? 'error' : 'success',
             $extemporanea
-                ? 'Requisición creada como EXTEMPORÁNEA: no se podrá enviar a revisión hasta que la autorice la Subdirección Administrativa.'
+                ? 'Requisición creada como EXTEMPORÁNEA: la Subdirección Administrativa debe autorizarla; al autorizarla se envía sola a revisión.'
                 : 'Requisición creada.',
         );
     }
 
     public function show(EgresoRequisicion $requisicion)
     {
-        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'extemporaneaAutorizador:id,name');
+        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'ordenCompra.movimientosClc.usuario:id,name', 'extemporaneaAutorizador:id,name', 'canceladaPor:id,name');
 
         $this->autorizarUnidad($requisicion);
 
@@ -364,7 +375,12 @@ class EgresoRequisicionController extends Controller
             'nombresPresupuesto' => $nombresPresupuesto,
             'validacion' => app(PresupuestoService::class)->validarRequisicion($requisicion),
             'puedeEditarse' => $this->puedeEditarse($requisicion),
-            'proveedores' => $user->can('ordenes-compra-create') && $requisicion->id_cat_egreso_requisicion_estado === EgresoRequisicion::COMPROMETIDA && !$requisicion->ordenCompra
+            'periodoCaptura' => EjercicioFiscal::periodoCaptura((int) ($requisicion->año ?: date('Y'))),
+            'puedeCambiarFecha' => $this->puedeCambiarFecha($requisicion),
+            'puedeCancelar' => $this->puedeCancelar($requisicion),
+            'estadosClc' => collect(TramiteClc::ESTADOS)->map(fn ($e) => $e[0]),
+            'puedeCambiarFechaOrden' => $user->can('ordenes-compra-fecha'),
+            'proveedores' => $user->can('ordenes-compra-create') && $requisicion->id_cat_egreso_requisicion_estado === EgresoRequisicion::COMPROMETIDA && ! $requisicion->ordenCompra
                 ? Proveedor::where('activo', true)->orderBy('nombre')->get(['id', 'nombre', 'rfc'])
                 : [],
             'modificaciones' => ModificacionPresupuestal::where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)
@@ -382,7 +398,7 @@ class EgresoRequisicionController extends Controller
         }
 
         $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
-        if ($idsVisibles !== null && !in_array((int) $requisicion->id_cat_egreso_unidad_administrativa, $idsVisibles, true)) {
+        if ($idsVisibles !== null && ! in_array((int) $requisicion->id_cat_egreso_unidad_administrativa, $idsVisibles, true)) {
             abort(403, 'Esta requisición no pertenece a tu secretaría.');
         }
     }
@@ -391,10 +407,11 @@ class EgresoRequisicionController extends Controller
     {
         $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa');
 
-        if (!$this->puedeEditarse($requisicion)) {
+        if (! $this->puedeEditarse($requisicion)) {
             return redirect()->route('requisiciones.show', $requisicion->id_tb_egreso_requisicion)
                 ->with('error', 'Esta requisición ya no se puede modificar en su estado actual.');
         }
+        abort_if($requisicion->id_cat_egreso_requisicion_estado === 6 && ! auth()->user()->can('requisiciones-cotizar'), 403, 'La cotización la captura Recursos Materiales.');
 
         $user = auth()->user();
         $unidadesQuery = EgresoUnidadAdministrativa::where('activo', 1);
@@ -419,11 +436,12 @@ class EgresoRequisicionController extends Controller
 
     public function update(Request $request, EgresoRequisicion $requisicion)
     {
-        if (!$this->puedeEditarse($requisicion)) {
+        if (! $this->puedeEditarse($requisicion)) {
             abort(403, 'Esta requisición ya no se puede modificar en su estado actual.');
         }
 
         $esCotizacion = $requisicion->id_cat_egreso_requisicion_estado === 6;
+        abort_if($esCotizacion && ! $request->user()->can('requisiciones-cotizar'), 403, 'La cotización la captura Recursos Materiales.');
 
         if ($esCotizacion) {
             $validated = $request->validate([
@@ -483,7 +501,7 @@ class EgresoRequisicionController extends Controller
 
             $user = auth()->user();
             $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
-            if ($idsVisibles !== null && !in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
+            if ($idsVisibles !== null && ! in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
                 abort(403, 'Esa unidad administrativa no pertenece a tu secretaría.');
             }
 
@@ -492,55 +510,57 @@ class EgresoRequisicionController extends Controller
             [$filasCalculadas, $totales] = $this->calcularFilas($validated['filas'] ?? [], (bool) ($validated['incluye_iva'] ?? false));
 
             DB::transaction(function () use ($requisicion, $validated, $filasCalculadas, $totales) {
-            $requisicion->update([
-                'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'],
-                'observaciones' => $validated['concepto'] ?? null,
-                'solicitado' => $validated['fecha_tramite'],
-                'sub_total' => $totales['sub_total'],
-                'iva' => $totales['iva'],
-                'total' => $totales['total'],
-                'monto_requisicion' => $totales['total'],
-            ]);
+                $requisicion->update([
+                    'id_cat_egreso_unidad_administrativa' => $validated['id_cat_egreso_unidad_administrativa'],
+                    'observaciones' => $validated['concepto'] ?? null,
+                    'solicitado' => $validated['fecha_tramite'],
+                    'sub_total' => $totales['sub_total'],
+                    'iva' => $totales['iva'],
+                    'total' => $totales['total'],
+                    'monto_requisicion' => $totales['total'],
+                ]);
 
-            EgresoRequisicionDetalle::where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)
-                ->get()
-                ->each(fn ($detalle) => $detalle->delete());
+                EgresoRequisicionDetalle::where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)
+                    ->get()
+                    ->each(fn ($detalle) => $detalle->delete());
 
-            if (!empty($filasCalculadas)) {
-                $detalleId = (EgresoRequisicionDetalle::max('id_tb_egreso_requisicion_detalle') ?? 0) + 1;
-                foreach ($filasCalculadas as $fila) {
-                    if (empty($fila['descripcion'])) continue;
-                    EgresoRequisicionDetalle::create([
-                        'id_tb_egreso_requisicion_detalle' => $detalleId++,
-                        'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-                        'id_cat_egreso_producto' => 1,
-                        'cantidad' => $fila['cantidad'],
-                        'descripcion' => $fila['descripcion'] ?? '',
-                        'fuente' => $fila['fuente'] ?? null,
-                        'proyecto' => $fila['proyecto'] ?? null,
-                        'partida' => $fila['partida'] ?? null,
-                        'articulo' => $fila['descripcion'] ?? null,
-                        'precio_unitario' => $fila['precio_unitario'],
-                        'sub_total' => $fila['sub_total'],
-                        'iva' => $fila['iva'],
-                        'iva_factor' => $fila['iva_factor'],
-                        'descuento' => 0,
-                        'total' => $fila['total'],
-                        'id_tb_egreso_presupuesto_detalle' => null,
-                        'id_tb_egreso_presupuesto' => null,
-                    ]);
+                if (! empty($filasCalculadas)) {
+                    $detalleId = (EgresoRequisicionDetalle::max('id_tb_egreso_requisicion_detalle') ?? 0) + 1;
+                    foreach ($filasCalculadas as $fila) {
+                        if (empty($fila['descripcion'])) {
+                            continue;
+                        }
+                        EgresoRequisicionDetalle::create([
+                            'id_tb_egreso_requisicion_detalle' => $detalleId++,
+                            'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                            'id_cat_egreso_producto' => 1,
+                            'cantidad' => $fila['cantidad'],
+                            'descripcion' => $fila['descripcion'] ?? '',
+                            'fuente' => $fila['fuente'] ?? null,
+                            'proyecto' => $fila['proyecto'] ?? null,
+                            'partida' => $fila['partida'] ?? null,
+                            'articulo' => $fila['descripcion'] ?? null,
+                            'precio_unitario' => $fila['precio_unitario'],
+                            'sub_total' => $fila['sub_total'],
+                            'iva' => $fila['iva'],
+                            'iva_factor' => $fila['iva_factor'],
+                            'descuento' => 0,
+                            'total' => $fila['total'],
+                            'id_tb_egreso_presupuesto_detalle' => null,
+                            'id_tb_egreso_presupuesto' => null,
+                        ]);
+                    }
                 }
-            }
 
-            $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
-            EgresoRequisicionBitacora::create([
-                'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
-                'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-                'id_cat_egreso_requisicion_estado_anterior' => $requisicion->id_cat_egreso_requisicion_estado,
-                'id_cat_egreso_requisicion_estado_nuevo' => $requisicion->id_cat_egreso_requisicion_estado,
-                'id_tb_usuarios' => 1,
-                'observaciones' => 'Requisición modificada: unidad admin y partidas actualizadas.',
-            ]);
+                $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
+                EgresoRequisicionBitacora::create([
+                    'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
+                    'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                    'id_cat_egreso_requisicion_estado_anterior' => $requisicion->id_cat_egreso_requisicion_estado,
+                    'id_cat_egreso_requisicion_estado_nuevo' => $requisicion->id_cat_egreso_requisicion_estado,
+                    'id_tb_usuarios' => 1,
+                    'observaciones' => 'Requisición modificada: unidad admin y partidas actualizadas.',
+                ]);
             });
         }
 
@@ -554,6 +574,7 @@ class EgresoRequisicionController extends Controller
             $requisicion->tbEgresoRequisicionDetalles()->get()->each(fn ($detalle) => $detalle->delete());
             $requisicion->delete();
         });
+
         return redirect()->route('requisiciones.index')->with('success', 'Requisición eliminada.');
     }
 
@@ -580,6 +601,117 @@ class EgresoRequisicionController extends Controller
     }
 
     /**
+     * Recursos Materiales y Control Presupuestal (permiso requisiciones-fecha) cambian la fecha de
+     * cualquier requisición; el enlace de cada secretaría, la de las suyas.
+     */
+    private function puedeCambiarFecha(EgresoRequisicion $requisicion): bool
+    {
+        $user = auth()->user();
+        if ($user->can('requisiciones-fecha')) {
+            return true;
+        }
+
+        $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
+
+        return $user->can('requisiciones-create')
+            && ($idsVisibles === null || in_array((int) $requisicion->id_cat_egreso_unidad_administrativa, $idsVisibles, true));
+    }
+
+    /**
+     * Antes de la orden de compra se puede cancelar: con el permiso requisiciones-cancelar en
+     * cualquiera de esos estados; el enlace de la secretaría, las suyas mientras no se envíen
+     * (pendiente o rechazada).
+     */
+    private function puedeCancelar(EgresoRequisicion $requisicion): bool
+    {
+        $estado = (int) $requisicion->id_cat_egreso_requisicion_estado;
+        if (! in_array($estado, EgresoRequisicion::CANCELABLES, true) || $requisicion->ordenCompra()->exists()) {
+            return false;
+        }
+
+        $user = auth()->user();
+        if ($user->can('requisiciones-cancelar')) {
+            return true;
+        }
+
+        $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
+
+        return in_array($estado, [1, 4], true) && $user->can('requisiciones-create')
+            && ($idsVisibles === null || in_array((int) $requisicion->id_cat_egreso_unidad_administrativa, $idsVisibles, true));
+    }
+
+    /** Cancela la requisición con su motivo; deja de contar en el presupuesto y queda en la bitácora. */
+    public function cancelar(Request $request, EgresoRequisicion $requisicion)
+    {
+        abort_unless($this->puedeCancelar($requisicion), 403, 'Esta requisición ya no se puede cancelar o no tienes permiso.');
+
+        $validated = $request->validate(
+            ['motivo' => 'required|string|min:5|max:1000'],
+            ['motivo.required' => 'Indica el motivo de la cancelación.', 'motivo.min' => 'El motivo debe tener al menos 5 caracteres.'],
+        );
+
+        $user = auth()->user();
+        $anterior = $requisicion->id_cat_egreso_requisicion_estado;
+
+        DB::transaction(function () use ($requisicion, $validated, $user, $anterior) {
+            $requisicion->update([
+                'id_cat_egreso_requisicion_estado' => EgresoRequisicion::CANCELADA,
+                'cancelada_at' => now(),
+                'cancelada_user_id' => $user->id,
+                'motivo_cancelacion' => $validated['motivo'],
+            ]);
+
+            $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
+            EgresoRequisicionBitacora::create([
+                'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
+                'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                'id_cat_egreso_requisicion_estado_anterior' => $anterior,
+                'id_cat_egreso_requisicion_estado_nuevo' => EgresoRequisicion::CANCELADA,
+                'id_tb_usuarios' => 1,
+                'observaciones' => "Requisición cancelada por {$user->name}. Motivo: {$validated['motivo']}",
+            ]);
+        });
+
+        return back()->with('success', "Requisición {$requisicion->folio_completo} cancelada.");
+    }
+
+    /** Cambia la fecha de trámite de la requisición (la que imprime el FUR); queda en la bitácora. */
+    public function cambiarFecha(Request $request, EgresoRequisicion $requisicion)
+    {
+        abort_unless($this->puedeCambiarFecha($requisicion), 403, 'No puedes cambiar la fecha de esta requisición.');
+
+        $año = (int) ($requisicion->año ?: date('Y'));
+        $validated = $request->validate([
+            'fecha' => ['required', 'date', 'before_or_equal:today', function ($attr, $valor, $fallo) use ($año) {
+                if ((int) date('Y', strtotime($valor)) !== $año) {
+                    $fallo("La fecha debe ser del ejercicio {$año}, como el folio de la requisición.");
+                }
+            }],
+        ], ['fecha.before_or_equal' => 'La fecha no puede ser futura.']);
+
+        $anterior = $requisicion->solicitado ? substr((string) $requisicion->solicitado, 0, 10) : null;
+        if ($anterior === $validated['fecha']) {
+            return back();
+        }
+
+        DB::transaction(function () use ($requisicion, $validated, $anterior) {
+            $requisicion->update(['solicitado' => $validated['fecha']]);
+
+            $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
+            EgresoRequisicionBitacora::create([
+                'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
+                'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
+                'id_cat_egreso_requisicion_estado_anterior' => $requisicion->id_cat_egreso_requisicion_estado,
+                'id_cat_egreso_requisicion_estado_nuevo' => $requisicion->id_cat_egreso_requisicion_estado,
+                'id_tb_usuarios' => 1,
+                'observaciones' => 'Fecha de trámite cambiada'.($anterior ? " del {$anterior}" : '')." al {$validated['fecha']} por ".auth()->user()->name.'.',
+            ]);
+        });
+
+        return back()->with('success', 'Fecha de la requisición actualizada.');
+    }
+
+    /**
      * La Subdirección Administrativa (Adquisiciones) autoriza una requisición capturada fuera del
      * periodo; queda registrado quién y cuándo.
      */
@@ -591,21 +723,31 @@ class EgresoRequisicionController extends Controller
 
         $user = auth()->user();
 
-        DB::transaction(function () use ($requisicion, $user) {
-            $requisicion->update(['extemporanea_user_id' => $user->id, 'extemporanea_autorizada_at' => now()]);
+        // Al autorizarla se envía sola a revisión (si aún estaba pendiente o rechazada).
+        $anterior = $requisicion->id_cat_egreso_requisicion_estado;
+        $aRevision = in_array($anterior, [1, 4], true);
+
+        DB::transaction(function () use ($requisicion, $user, $anterior, $aRevision) {
+            $requisicion->update([
+                'extemporanea_user_id' => $user->id,
+                'extemporanea_autorizada_at' => now(),
+                ...($aRevision ? ['id_cat_egreso_requisicion_estado' => 2] : []),
+            ]);
 
             $bitacoraId = (EgresoRequisicionBitacora::max('id_tb_egreso_requisicion_bitacora') ?? 0) + 1;
             EgresoRequisicionBitacora::create([
                 'id_tb_egreso_requisicion_bitacora' => $bitacoraId,
                 'id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion,
-                'id_cat_egreso_requisicion_estado_anterior' => $requisicion->id_cat_egreso_requisicion_estado,
+                'id_cat_egreso_requisicion_estado_anterior' => $anterior,
                 'id_cat_egreso_requisicion_estado_nuevo' => $requisicion->id_cat_egreso_requisicion_estado,
                 'id_tb_usuarios' => 1,
-                'observaciones' => "Requisición extemporánea autorizada por {$user->name}.",
+                'observaciones' => "Requisición extemporánea autorizada por {$user->name}.".($aRevision ? ' Enviada a revisión.' : ''),
             ]);
         });
 
-        return back()->with('success', 'Requisición extemporánea autorizada: ya se puede enviar a revisión.');
+        return back()->with('success', $aRevision
+            ? 'Requisición extemporánea autorizada y enviada a revisión.'
+            : 'Requisición extemporánea autorizada.');
     }
 
     /**
@@ -783,6 +925,104 @@ class EgresoRequisicionController extends Controller
         ]);
     }
 
+    /**
+     * Detalle de una partida en el ejercicio del gasto: requisiciones que la usan (con su orden de
+     * compra, CLC, proveedor, importe de la partida y fechas) y modificaciones presupuestales.
+     */
+    public function gastoDetalle(Request $request)
+    {
+        $clave = (string) $request->input('clave');
+        $partes = explode('|', $clave);
+        abort_unless(count($partes) === 4, 404);
+        [$unidad, $fuente, $proyecto, $partida] = $partes;
+
+        $user = auth()->user();
+        $ids = $this->unidadesVisibles($user, PresupuestoService::clavesUnidadVisibles($user) === null);
+        $idsUnidad = EgresoUnidadAdministrativa::whereRaw('TRIM(clave) = ?', [$unidad])
+            ->when($ids !== null, fn ($q) => $q->whereIn('id_cat_egreso_unidad_administrativa', $ids))
+            ->pluck('id_cat_egreso_unidad_administrativa');
+        abort_if($idsUnidad->isEmpty(), 403, 'Esta partida no pertenece a tu unidad administrativa.');
+
+        // Importe de la partida en cada requisición (una requisición puede usar varias partidas).
+        $importes = DB::table('tb_egreso_requisicion_detalle as d')
+            ->join('tb_egreso_requisicion as r', 'r.id_tb_egreso_requisicion', '=', 'd.id_tb_egreso_requisicion')
+            ->whereIn('r.id_cat_egreso_unidad_administrativa', $idsUnidad)
+            ->whereRaw('TRIM(d.fuente) = ?', [$fuente])
+            ->whereRaw('TRIM(d.proyecto) = ?', [$proyecto])
+            ->whereRaw('TRIM(d.partida) = ?', [$partida])
+            ->groupBy('r.id_tb_egreso_requisicion')
+            ->selectRaw('r.id_tb_egreso_requisicion as id, SUM(COALESCE(d.total, d.sub_total, 0)) as importe')
+            ->pluck('importe', 'id');
+
+        $requisiciones = EgresoRequisicion::with('catEgresoRequisicionEstado', 'ordenCompra.proveedor:id,nombre,rfc')
+            ->whereIn('id_tb_egreso_requisicion', $importes->keys())
+            ->orderByDesc('id_tb_egreso_requisicion')
+            ->get()
+            ->map(function (EgresoRequisicion $r) use ($importes) {
+                $oc = $r->ordenCompra;
+                $estado = (int) $r->id_cat_egreso_requisicion_estado;
+
+                return [
+                    'id' => $r->id_tb_egreso_requisicion,
+                    'folio' => $r->folio_completo,
+                    'fecha' => $r->registro,
+                    'estado_id' => $estado,
+                    'estado' => $r->catEgresoRequisicionEstado?->descripcion,
+                    'momento' => match (true) {
+                        in_array($estado, [4, EgresoRequisicion::CANCELADA], true) => null,
+                        (bool) $oc?->pago_fecha => 'Pagado',
+                        (bool) $oc?->xml_uuid => 'Devengado',
+                        (bool) $r->suficiencia => 'Comprometido',
+                        default => 'En trámite',
+                    },
+                    'importe' => round((float) $importes[$r->id_tb_egreso_requisicion], 2),
+                    'suficiencia_fecha' => $r->suficiencia_fecha?->toIso8601String(),
+                    'cancelada_at' => $r->cancelada_at?->toIso8601String(),
+                    'orden' => $oc ? [
+                        'id' => $oc->id,
+                        'folio' => $oc->folio_completo,
+                        'fecha' => $oc->fecha?->format('Y-m-d'),
+                        'importe' => $oc->importe,
+                        'proveedor' => $oc->proveedor?->nombre,
+                        'factura' => $oc->xml_uuid ? (trim(($oc->xml_serie ?? '').' '.($oc->xml_folio ?? '')) ?: $oc->xml_uuid) : null,
+                        'factura_fecha' => $oc->xml_fecha?->toIso8601String(),
+                        'clc' => $oc->clc_folio_completo,
+                        'clc_fecha' => $oc->clc_fecha?->format('Y-m-d'),
+                        'clc_estado' => $oc->clc_folio_completo ? TramiteClc::descripcion($oc->clc_estado) : null,
+                        'pago_fecha' => $oc->pago_fecha?->format('Y-m-d'),
+                    ] : null,
+                ];
+            })->values();
+
+        $lado = fn ($q, string $l) => $q->where("{$l}_clave", $unidad)->where("{$l}_fuente", $fuente)
+            ->where("{$l}_proyecto", $proyecto)->where("{$l}_partida", $partida);
+
+        $modificaciones = ModificacionPresupuestal::query()
+            ->where(fn ($q) => $q->where(fn ($q) => $lado($q, 'origen'))->orWhere(fn ($q) => $lado($q, 'destino')))
+            ->orderByDesc('id')
+            ->get()
+            ->map(function (ModificacionPresupuestal $m) use ($clave) {
+                $esOrigen = $m->claveLinea('origen') === $clave;
+                $mes = $m->{$esOrigen ? 'origen_mes' : 'destino_mes'};
+
+                return [
+                    'id' => $m->id,
+                    'folio' => $m->folio_completo,
+                    'tipo' => ModificacionPresupuestal::TIPOS[$m->tipo] ?? $m->tipo,
+                    'estado' => $m->estado,
+                    'lado' => $esOrigen ? 'Emisor' : 'Receptor',
+                    'contraparte' => $esOrigen ? $m->destino_descripcion : $m->origen_descripcion,
+                    'mes' => $mes ? SaldosMensuales::MESES[$mes] : null,
+                    // Con signo: lo que suma o resta a esta partida.
+                    'importe' => round(($esOrigen ? -1 : 1) * $m->importe, 2),
+                    'fecha' => $m->created_at?->toIso8601String(),
+                    'resuelto_at' => $m->resuelto_at?->toIso8601String(),
+                ];
+            })->values();
+
+        return response()->json(['requisiciones' => $requisiciones, 'modificaciones' => $modificaciones]);
+    }
+
     /** La misma consulta de la pantalla (unidad, solo con movimiento y búsqueda) en un Excel. */
     public function exportarGasto(Request $request)
     {
@@ -811,12 +1051,13 @@ class EgresoRequisicionController extends Controller
     /**
      * Líneas visibles para el usuario con los filtros de la pantalla del gasto.
      *
-     * @return array{0: \Illuminate\Support\Collection, 1: \Illuminate\Support\Collection}
+     * @return array{0: Collection, 1: Collection}
      */
     private function lineasDelGasto(Request $request): array
     {
         $user = auth()->user();
-        $isAdmin = $user->hasRole(['Super Admin', 'Admin']);
+        // Admin y Control Presupuestal (autoriza modificaciones) ven todas las unidades, como en el presupuesto.
+        $isAdmin = PresupuestoService::clavesUnidadVisibles($user) === null;
 
         $unidadesQuery = EgresoUnidadAdministrativa::where('activo', 1);
         $idsVisibles = $this->unidadesVisibles($user, $isAdmin);
@@ -842,7 +1083,7 @@ class EgresoRequisicionController extends Controller
         ]);
 
         if ($request->boolean('con_movimiento')) {
-            $filas = $filas->filter(fn ($l) => $l['modificado'] != 0 || $l['comprometido'] != 0 || $l['en_tramite'] != 0)->values();
+            $filas = $filas->filter(fn ($l) => $l['modificado'] != 0 || $l['comprometido'] != 0 || $l['devengado'] != 0 || $l['pagado'] != 0)->values();
         }
 
         // Misma búsqueda que la pantalla: todas las palabras deben aparecer en unidad, fuente, proyecto o partida.
@@ -861,11 +1102,18 @@ class EgresoRequisicionController extends Controller
 
     public function pdf(EgresoRequisicion $requisicion)
     {
-        if (!in_array($requisicion->id_cat_egreso_requisicion_estado, [3, ...self::ESTADOS_RECURSOS_MATERIALES], true)) {
+        if (! in_array($requisicion->id_cat_egreso_requisicion_estado, [3, ...self::ESTADOS_RECURSOS_MATERIALES], true)) {
             abort(403, 'El PDF solo está disponible para requisiciones validadas.');
         }
         $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoUnidadAdministrativa');
-        $pdf = Pdf::loadView('requisiciones.pdf', compact('requisicion'));
+        $pdf = Pdf::loadView('requisiciones.pdf', compact('requisicion'))->setPaper('letter');
+
+        // Pie: "Página N de M" y el folio (dompdf no conoce el total de páginas desde el CSS).
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $fuente = $pdf->getDomPDF()->getFontMetrics()->getFont('Helvetica');
+        $canvas->page_text($canvas->get_width() - 185, $canvas->get_height() - 27, "Página {PAGE_NUM} de {PAGE_COUNT}     FUR {$requisicion->folio_completo}", $fuente, 7.5);
+
         return $pdf->stream("FUR-{$requisicion->folio_completo}.pdf");
     }
 }
