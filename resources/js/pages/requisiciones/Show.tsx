@@ -11,6 +11,7 @@ import { useState } from 'react';
 import ConfirmarAccion from '@/components/confirmar-accion';
 import type { OpcionesAccion, TonoAccion } from '@/components/confirmar-accion';
 import EditarFecha from '@/components/editar-fecha';
+import EstadoSat from '@/components/estado-sat';
 import SearchableSelect from '@/components/searchable-select';
 import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
@@ -959,6 +960,14 @@ export default function Show({
                                                 Total factura:
                                             </span>{' '}
                                             {money(orden.xml_total)}
+                                        </div>
+                                        <div className="col-span-2">
+                                            <EstadoSat
+                                                orden={orden}
+                                                puedeVerificar={puede(
+                                                    'ordenes-compra-verificar-sat',
+                                                )}
+                                            />
                                         </div>
                                     </div>
                                 ) : null}

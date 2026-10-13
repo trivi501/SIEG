@@ -24,6 +24,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -448,6 +449,80 @@ class PresupuestoLineaTest extends TestCase
         $subir(2, $cfdi('99999999-2222-3333-4444-555555555555', '274'))->assertSessionHasNoErrors();
         $this->assertSame('274', $ordenes[2]->fresh()->xml_folio);
         $this->assertCount(2, Storage::disk('local')->allFiles());
+    }
+
+    public function test_factura_se_verifica_en_el_sat_al_cargar_y_antes_de_pagar()
+    {
+        Storage::fake('local');
+        $this->crearTablasRequisicion();
+        $proveedor = Proveedor::create(['nombre' => 'DORACELI VALADEZ RODRIGUEZ', 'rfc' => 'VARD870519SR4', 'activo' => true]);
+        $this->requisicion(1, 4524);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-09-01', 'importe' => 4524,
+        ]);
+        $xml = UploadedFile::fake()->createWithContent('factura.xml', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Serie="1" Folio="273" Fecha="2026-09-01T08:26:09" SubTotal="3900.00" Total="4524.00" Sello="ABCDEFGHIJKLmnopQRSTuvwx12345678" TipoDeComprobante="I">
+              <cfdi:Emisor Rfc="VARD870519SR4" Nombre="DORACELI VALADEZ RODRIGUEZ" RegimenFiscal="612" />
+              <cfdi:Receptor Rfc="MGU6501015R2" Nombre="MUNICIPIO DE GUADALUPE ZAC" UsoCFDI="G03" />
+              <cfdi:Complemento>
+                <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="1.1" UUID="E788CBF2-688D-473B-BCC1-340042ECC3A8" />
+              </cfdi:Complemento>
+            </cfdi:Comprobante>
+            XML);
+        $subir = fn () => $this->post("/ordenes-compra/{$orden->id}/xml", ['xml' => $xml]);
+
+        // Cancelada o inexistente en el SAT: no se acepta.
+        $this->estadoSat = 'Cancelado';
+        $subir()->assertSessionHasErrors('xml');
+        $this->assertStringContainsString('está CANCELADA en el SAT', session('errors')->first('xml'));
+        $this->estadoSat = 'No Encontrado';
+        $subir()->assertSessionHasErrors('xml');
+        $this->assertStringContainsString('no existe en el SAT', session('errors')->first('xml'));
+        $this->assertNull($orden->fresh()->xml_uuid);
+        Storage::disk('local')->assertDirectoryEmpty('/');
+
+        // La expresión que se manda al SAT lleva emisor, receptor, total, UUID y los últimos 8 del sello.
+        Http::assertSent(fn ($r) => str_contains($r->body(), 'id=E788CBF2-688D-473B-BCC1-340042ECC3A8&amp;re=VARD870519SR4&amp;rr=MGU6501015R2&amp;tt=4524.0&amp;fe=12345678'));
+
+        // Si el SAT no responde, se deja cargar y se avisa.
+        $this->estadoSat = null;
+        $subir()->assertSessionHasNoErrors()->assertSessionHas('warning');
+        $orden->refresh();
+        $this->assertSame('E788CBF2-688D-473B-BCC1-340042ECC3A8', $orden->xml_uuid);
+        $this->assertNull($orden->sat_estado);
+
+        // Verificar después: vigente, con emisor en la lista de EFOS (aviso).
+        $this->estadoSat = 'Vigente';
+        $this->efosSat = true;
+        $this->post("/ordenes-compra/{$orden->id}/verificar-sat")->assertSessionHas('success')->assertSessionHas('warning');
+        $orden->refresh();
+        $this->assertSame('Vigente', $orden->sat_estado);
+        $this->assertTrue($orden->sat_efos);
+        $this->assertNotNull($orden->sat_verificado_at);
+
+        // El proveedor la cancela; al pagar se vuelve a consultar y se detiene.
+        $this->efosSat = false;
+        $this->estadoSat = 'Cancelado';
+        $orden->update(['clc_folio' => 1, 'clc_año' => 2026, 'clc_folio_completo' => 'CLC-2026-0001', 'clc_estado' => 'recibida_egresos']);
+        $pago = ['accion' => 'pagar', 'ordenes' => [$orden->id], 'pago_fecha' => '2026-10-05', 'pago_forma' => 'transferencia'];
+        $this->post('/clc/accion', $pago)->assertSessionHasErrors('ordenes');
+        $this->assertStringContainsString('CLC-2026-0001: La factura E788CBF2-688D-473B-BCC1-340042ECC3A8 está CANCELADA', session('errors')->first('ordenes'));
+        $orden->refresh();
+        $this->assertNull($orden->pago_fecha);
+        $this->assertSame('Cancelado', $orden->sat_estado);
+        $this->assertSame('Cancelado sin aceptación', $orden->sat_estatus_cancelacion);
+
+        // Vigente: se paga.
+        $this->estadoSat = 'Vigente';
+        $this->post('/clc/accion', $pago)->assertSessionHasNoErrors();
+        $this->assertSame('pagada', $orden->fresh()->clc_estado);
+
+        // Verificar en el SAT requiere su permiso.
+        $sinPermiso = User::factory()->create();
+        $sinPermiso->givePermissionTo('requisiciones-index');
+        $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/verificar-sat")->assertForbidden();
     }
 
     public function test_tramite_clc_por_area_y_recepcion_parcial()

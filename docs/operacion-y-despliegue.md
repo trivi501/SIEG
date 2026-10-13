@@ -28,6 +28,16 @@ php artisan optimize:clear && php artisan optimize
 php artisan queue:restart
 ```
 
+## Verificación de facturas en el SAT
+
+Al cargar un XML y antes de pagar, el servidor consulta `https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc`: necesita salida HTTPS a internet y los certificados raíz instalados (`ca-certificates` en Linux). Probar desde el servidor:
+
+```bash
+curl -sI https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc | head -1
+```
+
+Si el SAT no responde, la carga y el pago continúan con aviso y el motivo queda en `storage/logs/laravel.log` ("Consulta de CFDI … al SAT"). En Windows/Laragon, PHP necesita `curl.cainfo` apuntando a un `cacert.pem` en `php.ini` (error "cURL error 60").
+
 ## Procesos
 
 - **Worker de la cola** (`php artisan queue:work`): la app no encola trabajos propios hoy, pero las notificaciones y futuros procesos lo usan; se recomienda dejarlo como servicio.

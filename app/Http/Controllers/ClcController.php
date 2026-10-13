@@ -57,6 +57,10 @@ class ClcController extends Controller
                 'relacion' => $o->relacionClc?->folio_completo,
                 'pago_fecha' => $o->pago_fecha?->toDateString(),
                 'transferencia' => $o->transferencia_numero,
+                'sat_estado' => $o->sat_estado,
+                'sat_estatus_cancelacion' => $o->sat_estatus_cancelacion,
+                'sat_efos' => $o->sat_efos,
+                'sat_verificado_at' => $o->sat_verificado_at?->toIso8601String(),
                 'relacion_id' => $o->clc_relacion_id,
                 'devolucion' => $o->clc_estado === 'devuelta' ? $o->movimientosClc->first()?->observaciones : null,
                 // Entra en "Seguimiento": todas para Control Presupuestal / Admin; las de su secretaría para los demás.

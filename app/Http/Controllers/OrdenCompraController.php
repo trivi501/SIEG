@@ -6,6 +6,7 @@ use App\Models\EgresoRequisicion;
 use App\Models\EgresoRequisicionBitacora;
 use App\Models\OrdenCompra;
 use App\Models\Proveedor;
+use App\Services\EstadoCfdiSat;
 use App\Services\TramiteClc;
 use Barryvdh\DomPDF\Facade\Pdf;
 use DOMDocument;
@@ -114,7 +115,7 @@ class OrdenCompraController extends Controller
      * Carga la factura (CFDI) de la orden de compra. El total del XML debe coincidir con lo
      * cotizado y el emisor debe ser el proveedor de la orden.
      */
-    public function cargarXml(Request $request, OrdenCompra $ordenCompra)
+    public function cargarXml(Request $request, OrdenCompra $ordenCompra, EstadoCfdiSat $estadoSat)
     {
         if ($ordenCompra->xml_uuid) {
             return back()->with('error', 'Esta orden de compra ya tiene su factura cargada.');
@@ -144,6 +145,13 @@ class OrdenCompraController extends Controller
             throw ValidationException::withMessages(['xml' => implode(' ', $errores)]);
         }
 
+        // Estado en el SAT: no se acepta una factura cancelada o que el SAT no tiene registrada.
+        $xml = EstadoCfdiSat::datosDelXml($contenido);
+        $sat = $estadoSat->consultar($cfdi['rfc_emisor'] ?? '', $xml['rfc_receptor'] ?? '', $cfdi['total'], $cfdi['uuid'], $xml['sello']);
+        if ($sat && ($error = EstadoCfdiSat::error($sat, $cfdi['uuid']))) {
+            throw ValidationException::withMessages(['xml' => $error]);
+        }
+
         $ruta = "ordenes-compra/{$ordenCompra->año}/{$ordenCompra->folio_completo}_{$cfdi['uuid']}.xml";
         Storage::disk('local')->put($ruta, $contenido);
 
@@ -155,8 +163,52 @@ class OrdenCompraController extends Controller
             throw ValidationException::withMessages(['xml' => implode(' ', $this->duplicidades($ordenCompra, $cfdi))
                 ?: "La factura {$cfdi['uuid']} ya se cargó en otra orden de compra."]);
         }
+        EstadoCfdiSat::guardar($ordenCompra, $sat);
 
-        return back()->with('success', 'Factura cargada: el gasto pasa de comprometido a devengado.');
+        $mensaje = 'Factura cargada: el gasto pasa de comprometido a devengado.';
+        if (! $sat) {
+            return back()->with('success', $mensaje)
+                ->with('warning', 'No se pudo verificar la factura en el SAT (el servicio no respondió). Verifícala más tarde con el botón "Verificar en el SAT".');
+        }
+
+        return back()->with('success', $mensaje.' Vigente en el SAT.')
+            ->with('warning', $sat['efos'] ? self::avisoEfos($cfdi['rfc_emisor']) : null);
+    }
+
+    /**
+     * Vuelve a consultar en el SAT la factura de la orden (el proveedor pudo cancelarla después de entregarla).
+     */
+    public function verificarSat(OrdenCompra $ordenCompra, EstadoCfdiSat $estadoSat)
+    {
+        if (! $ordenCompra->xml_uuid) {
+            return back()->with('error', 'La orden de compra no tiene factura cargada.');
+        }
+
+        $sat = $estadoSat->consultarOrden($ordenCompra);
+        if (! $sat) {
+            return back()->with('error', 'El SAT no respondió; intenta más tarde.');
+        }
+
+        $anterior = $ordenCompra->sat_estado;
+        EstadoCfdiSat::guardar($ordenCompra, $sat);
+
+        if ($anterior !== $sat['estado']) {
+            $requisicion = $ordenCompra->requisicion;
+            $this->bitacora($requisicion, $requisicion->id_cat_egreso_requisicion_estado,
+                "Factura {$ordenCompra->xml_uuid} verificada en el SAT por ".auth()->user()->name.": {$sat['estado']}"
+                .($sat['estatus_cancelacion'] ? " ({$sat['estatus_cancelacion']})" : '').'.');
+        }
+
+        $redirect = back()->with('warning', $sat['efos'] ? self::avisoEfos($ordenCompra->xml_rfc_emisor) : null);
+
+        return $sat['estado'] === EstadoCfdiSat::VIGENTE
+            ? $redirect->with('success', 'Factura vigente en el SAT.'.($sat['estatus_cancelacion'] ? " Estatus de cancelación: {$sat['estatus_cancelacion']}." : ''))
+            : $redirect->with('error', EstadoCfdiSat::error($sat, $ordenCompra->xml_uuid));
+    }
+
+    private static function avisoEfos(?string $rfc): string
+    {
+        return "Atención: el emisor {$rfc} aparece en la lista de EFOS del SAT (empresas que facturan operaciones simuladas). Revisa antes de pagar.";
     }
 
     /**

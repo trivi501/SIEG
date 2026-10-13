@@ -42,6 +42,7 @@ class SyncPermissions extends Command
 
             // Órdenes de compra (Recursos Materiales)
             'ordenes-compra-create', 'ordenes-compra-pagar', 'ordenes-compra-fecha',
+            'ordenes-compra-verificar-sat', // vuelve a consultar en el SAT si la factura sigue vigente
 
             // Trámite de CLC: ver la bandeja y actuar como cada área (el pago es ordenes-compra-pagar).
             'clc-index', 'clc-recursos-materiales', 'clc-control-presupuestal', 'clc-sindicatura', 'clc-egresos',

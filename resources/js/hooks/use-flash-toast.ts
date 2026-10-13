@@ -21,7 +21,11 @@ export function useFlashToast(): void {
     useEffect(() => {
         return router.on('success', (event) => {
             const flash = (event as CustomEvent).detail?.page?.props?.flash as
-                | { success?: string | null; error?: string | null }
+                | {
+                      success?: string | null;
+                      error?: string | null;
+                      warning?: string | null;
+                  }
                 | undefined;
 
             if (flash?.success) {
@@ -30,6 +34,10 @@ export function useFlashToast(): void {
 
             if (flash?.error) {
                 toast.error(flash.error);
+            }
+
+            if (flash?.warning) {
+                toast.warning(flash.warning, { duration: 10000 });
             }
         });
     }, []);

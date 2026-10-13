@@ -2,6 +2,8 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Banknote, FileText, Inbox, Search, Send, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import ConfirmarAccion from '@/components/confirmar-accion';
+import EstadoSat from '@/components/estado-sat';
+import type { EstadoSatFactura } from '@/components/estado-sat';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -29,7 +31,7 @@ const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Trámite de CLC', href: '/clc' },
 ];
 
-interface Clc {
+interface Clc extends EstadoSatFactura {
     id: number;
     clc: string;
     clc_fecha: string | null;
@@ -371,6 +373,15 @@ export default function Index({
                         </TableCell>
                         <TableCell className="max-w-56 text-xs whitespace-normal">
                             {c.proveedor ?? '—'}
+                            <div className="mt-1">
+                                <EstadoSat
+                                    orden={c}
+                                    compacto
+                                    puedeVerificar={puede(
+                                        'ordenes-compra-verificar-sat',
+                                    )}
+                                />
+                            </div>
                         </TableCell>
                         <TableCell className="text-right">
                             {money(c.importe)}

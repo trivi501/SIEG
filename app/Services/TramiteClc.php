@@ -113,6 +113,9 @@ final class TramiteClc
         if (($config['observaciones'] ?? false) && blank($datos['observaciones'] ?? null)) {
             throw ValidationException::withMessages(['observaciones' => 'Escribe las observaciones de la devolución.']);
         }
+        if ($config['pago'] ?? false) {
+            $this->verificarFacturasEnSat($ids);
+        }
 
         return DB::transaction(function () use ($accion, $config, $ids, $user, $datos) {
             /** @var Collection<int, OrdenCompra> $ordenes */
@@ -163,6 +166,30 @@ final class TramiteClc
 
             return $relacion;
         });
+    }
+
+    /**
+     * Antes de pagar se vuelve a consultar cada factura en el SAT (fuera de la transacción: es una llamada
+     * externa). Una cancelada o no encontrada detiene el pago; si el SAT no responde, se deja pagar.
+     *
+     * @param  array<int>  $ids
+     */
+    private function verificarFacturasEnSat(array $ids): void
+    {
+        $sat = app(EstadoCfdiSat::class);
+        $errores = [];
+
+        foreach (OrdenCompra::whereIn('id', $ids)->whereNotNull('xml_uuid')->get() as $orden) {
+            $estado = $sat->consultarOrden($orden);
+            EstadoCfdiSat::guardar($orden, $estado);
+            if ($estado && ($error = EstadoCfdiSat::error($estado, $orden->xml_uuid))) {
+                $errores[] = "{$orden->clc_folio_completo}: {$error}";
+            }
+        }
+
+        if ($errores) {
+            throw ValidationException::withMessages(['ordenes' => 'No se puede pagar. '.implode(' ', $errores)]);
+        }
     }
 
     /** El área solo envía las CLC de su secretaría o dirección (Admin, todas). */

@@ -15,7 +15,7 @@ La base se creó el 8 de octubre de 2026 copiando de la base de SIEMG (`laravel`
 | `tb_egreso_requisicion_bitacora` | Bitácora de cambios de cada requisición |
 | `cat_egreso_requisicion_estado` | 1 Pendiente, 2 En Revisión, 3 Aprobada, 4 Rechazada, 5 En Recursos Materiales, 6 En Cotización |
 | `proveedores` | Catálogo de proveedores con su cuenta bancaria (`id_cat_banco`, `clabe`, `cuenta_bancaria`); `tb_egreso_proveedor` legado no se usa |
-| `ordenes_compra` | Orden de compra por requisición, datos de su CFDI, CLC y pago (`transferencia_numero` TRF-AÑO-0001, consecutivo por año, único) |
+| `ordenes_compra` | Orden de compra por requisición, datos de su CFDI, CLC y pago (`transferencia_numero` TRF-AÑO-0001, consecutivo por año, único; `sat_estado` Vigente/Cancelado/No Encontrado, `sat_estatus_cancelacion`, `sat_efos`, `sat_verificado_at`) |
 | `modificaciones_presupuestales` | Traspasos, reducciones y ampliaciones; origen y destino por clave de línea, para sobrevivir a una re-importación del presupuesto |
 | `users` | Usuarios; `id_cat_egreso_unidad_administrativa` = su secretaría o dirección (una sola). `secretaria_id` ya no se usa |
 | `secretarias` | **Sin uso** desde el 2026-10-11 (secretarías y direcciones se unificaron en `cat_egreso_unidad_administrativa`); se conserva por historial |

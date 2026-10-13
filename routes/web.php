@@ -33,7 +33,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::patch('presupuesto/{presupuesto}', [PresupuestoController::class, 'update'])->name('presupuesto.update');
     });
     Route::post('presupuesto/correr-saldos', [PresupuestoController::class, 'correrSaldos'])->name('presupuesto.correr-saldos')->middleware('permission:presupuesto-correr-saldos');
-    Route::post('presupuesto/import',[PresupuestoController::class, 'import'])->name('presupuesto.import')->middleware('permission:presupuesto-import');
+    Route::post('presupuesto/import', [PresupuestoController::class, 'import'])->name('presupuesto.import')->middleware('permission:presupuesto-import');
     Route::delete('presupuesto', [PresupuestoController::class, 'destroy'])->name('presupuesto.destroy')->middleware('permission:presupuesto-delete');
 
     // Secretarías y direcciones son un solo catálogo (cat_egreso_unidad_administrativa).
@@ -90,6 +90,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('ordenes-compra/{ordenCompra}/pago', [OrdenCompraController::class, 'registrarPago'])->name('ordenes-compra.pago')->middleware('permission:ordenes-compra-pagar');
     Route::get('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'descargarXml'])->name('ordenes-compra.xml.descargar')->middleware('permission:requisiciones-index');
     Route::post('ordenes-compra/{ordenCompra}/fecha', [OrdenCompraController::class, 'cambiarFecha'])->name('ordenes-compra.fecha')->middleware('permission:ordenes-compra-fecha');
+    Route::post('ordenes-compra/{ordenCompra}/verificar-sat', [OrdenCompraController::class, 'verificarSat'])->name('ordenes-compra.verificar-sat')->middleware('permission:ordenes-compra-verificar-sat');
     Route::post('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'generarClc'])->name('ordenes-compra.clc')->middleware('permission:requisiciones-clc');
     Route::get('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'clcPdf'])->name('ordenes-compra.clc.pdf')->middleware('permission:requisiciones-index');
 

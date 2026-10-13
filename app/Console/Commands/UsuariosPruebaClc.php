@@ -42,13 +42,13 @@ class UsuariosPruebaClc extends Command
         ]],
         'Recursos Materiales' => ['recursos.materiales', [
             'requisiciones-index', 'requisiciones-edit', 'requisiciones-cotizar', 'requisiciones-suficiencia', 'requisiciones-fecha', 'requisiciones-cancelar',
-            'recursos-materiales-index', 'ordenes-compra-create', 'ordenes-compra-fecha', 'proveedores-index', 'proveedores-create', 'proveedores-edit',
+            'recursos-materiales-index', 'ordenes-compra-create', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'proveedores-index', 'proveedores-create', 'proveedores-edit',
             'clc-index', 'clc-recursos-materiales',
         ]],
         'Control Presupuestal' => ['control.presupuestal', [
             // Requisiciones de todas las áreas (la cotización y la bandeja son de Recursos Materiales).
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-delete', 'requisiciones-suficiencia',
-            'requisiciones-clc', 'requisiciones-extemporaneas', 'requisiciones-fecha', 'requisiciones-cancelar', 'ordenes-compra-fecha',
+            'requisiciones-clc', 'requisiciones-extemporaneas', 'requisiciones-fecha', 'requisiciones-cancelar', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat',
             'presupuesto-index', 'gasto-index', 'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar', 'auditoria-index',
             'clc-index', 'clc-control-presupuestal',
             // Administra usuarios, roles y permisos.
@@ -56,7 +56,7 @@ class UsuariosPruebaClc extends Command
             'catalogos-regidores-index', 'catalogos-regidores-create', 'catalogos-regidores-edit', 'catalogos-regidores-delete',
         ]],
         'Sindicatura' => ['sindicatura', ['clc-index', 'clc-sindicatura']],
-        'Egresos' => ['egresos', ['clc-index', 'clc-egresos', 'ordenes-compra-pagar']],
+        'Egresos' => ['egresos', ['clc-index', 'clc-egresos', 'ordenes-compra-pagar', 'ordenes-compra-verificar-sat']],
     ];
 
     public function handle(): int
