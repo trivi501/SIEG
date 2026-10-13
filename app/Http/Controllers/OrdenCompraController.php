@@ -99,8 +99,15 @@ class OrdenCompraController extends Controller
     {
         $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');
 
-        return Pdf::loadView('ordenes-compra.pdf', ['orden' => $ordenCompra])
-            ->stream("{$ordenCompra->folio_completo}.pdf");
+        $pdf = Pdf::loadView('ordenes-compra.pdf', ['orden' => $ordenCompra])->setPaper('letter');
+
+        // Pie: "Página N de M" y el folio (dompdf no conoce el total de páginas desde el CSS).
+        $pdf->render();
+        $canvas = $pdf->getDomPDF()->getCanvas();
+        $canvas->page_text($canvas->get_width() - 200, $canvas->get_height() - 28, "Página {PAGE_NUM} de {PAGE_COUNT}      {$ordenCompra->folio_completo}",
+            $pdf->getDomPDF()->getFontMetrics()->getFont('Helvetica'), 7);
+
+        return $pdf->stream("{$ordenCompra->folio_completo}.pdf");
     }
 
     /**

@@ -306,6 +306,7 @@ class PresupuestoLineaTest extends TestCase
         $this->post("/ordenes-compra/{$orden->id}/clc")->assertSessionHas('error');
         $this->assertSame(sprintf('CLC-%d-0001', now('America/Mexico_City')->year), $orden->fresh()->clc_folio_completo);
         $this->assertSame(EgresoRequisicion::CLC_GENERADA, (int) DB::table('tb_egreso_requisicion')->where('id_tb_egreso_requisicion', 1)->value('id_cat_egreso_requisicion_estado'));
+        $this->get("/ordenes-compra/{$orden->id}/pdf")->assertOk()->assertHeader('content-type', 'application/pdf');
         $this->get("/ordenes-compra/{$orden->id}/clc")->assertOk()->assertHeader('content-type', 'application/pdf');
 
         // La CLC requiere factura.
