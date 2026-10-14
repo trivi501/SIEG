@@ -122,7 +122,7 @@
             <td></td>
             <td class="caja">{{ mb_strtoupper($cuenta?->banco?->descripcion ?? '—') }}</td>
             <td></td>
-            <td class="caja" style="text-align: right;">{{ $cuenta?->cuenta ?: '—' }}</td>
+            <td class="caja" style="text-align: center;">{{ $cuenta?->cuenta ?: '—' }}</td>
             <td></td>
             <td class="caja">{{ $cuenta?->clabe ?: '—' }}</td>
         </tr>
