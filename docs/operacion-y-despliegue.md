@@ -33,8 +33,10 @@ php artisan queue:restart
 Al cargar un XML y antes de pagar, el servidor consulta `https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc`: necesita salida HTTPS a internet y los certificados raíz instalados (`ca-certificates` en Linux). Probar desde el servidor:
 
 ```bash
-curl -sI https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc | head -1
+curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: text/xml; charset=utf-8" -H "SOAPAction: http://tempuri.org/IConsultaCFDIService/Consulta" --data '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:tem="http://tempuri.org/"><soapenv:Body><tem:Consulta><tem:expresionImpresa>?re=AAA010101AAA&amp;rr=XAXX010101000&amp;tt=1.0&amp;id=00000000-0000-0000-0000-000000000000</tem:expresionImpresa></tem:Consulta></soapenv:Body></soapenv:Envelope>' https://consultaqr.facturaelectronica.sat.gob.mx/ConsultaCFDIService.svc
 ```
+
+Debe imprimir `200`. (`curl -I` da 404 aunque el servicio funcione: el SAT solo responde a la consulta SOAP).
 
 Si el SAT no responde, la carga y el pago continúan con aviso y el motivo queda en `storage/logs/laravel.log` ("Consulta de CFDI … al SAT"). En Windows/Laragon, PHP necesita `curl.cainfo` apuntando a un `cacert.pem` en `php.ini` (error "cURL error 60").
 

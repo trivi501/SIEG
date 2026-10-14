@@ -13,8 +13,6 @@ use App\Http\Controllers\SupportTicketController;
 use Illuminate\Support\Facades\Route;
 use Rap2hpoutre\LaravelLogViewer\LogViewerController;
 
-Route::bind('catalogo', fn (string $slug) => Catalogos::buscar($slug) ?? abort(404));
-
 Route::inertia('/', 'welcome')->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {

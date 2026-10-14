@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Catalogos\Catalogos;
 use App\Models\Auditoria;
 use App\Observers\AuditoriaObserver;
 use Carbon\CarbonImmutable;
@@ -11,6 +12,7 @@ use Illuminate\Auth\Events\Logout;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Spatie\Permission\Models\Permission;
@@ -33,6 +35,10 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->configurarAuditoria();
+
+        // {catalogo} de /catalogos/{catalogo} → Catalogo. Va aquí y no en routes/web.php: con las rutas en
+        // caché (php artisan optimize) ese archivo no se ejecuta y todos los catálogos darían 404.
+        Route::bind('catalogo', fn (string $slug) => Catalogos::buscar($slug) ?? abort(404));
     }
 
     /**
