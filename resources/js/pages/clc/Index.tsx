@@ -4,6 +4,7 @@ import { useState } from 'react';
 import ConfirmarAccion from '@/components/confirmar-accion';
 import EstadoSat from '@/components/estado-sat';
 import type { EstadoSatFactura } from '@/components/estado-sat';
+import Paginacion, { paginar } from '@/components/paginacion';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -242,6 +243,35 @@ export default function Index({
     const [filtroPago, setFiltroPago] = useState<
         'todas' | 'tramite' | 'pagadas'
     >('todas');
+    // Página de cada tabla (bandeja, seguimiento, relaciones); la búsqueda regresa a la primera.
+    const [paginas, setPaginas] = useState<Record<string, number>>({});
+    const irA = (grupo: string, pagina: number) =>
+        setPaginas((p) => ({ ...p, [grupo]: pagina }));
+    const cambiarBusqueda = (texto: string) => {
+        setBuscar(texto);
+        setPaginas({});
+    };
+    // Sin distinguir mayúsculas ni acentos ("tesoreria" encuentra "TESORERÍA").
+    const normalizar = (texto: string) =>
+        texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const terminos = normalizar(buscar.trim()).split(/\s+/).filter(Boolean);
+    const coincide = (valores: (string | number | null | undefined)[]) => {
+        const texto = normalizar(valores.join(' '));
+
+        return terminos.every((t) => texto.includes(t));
+    };
+    const coincideClc = (c: Clc) =>
+        coincide([
+            c.clc,
+            c.orden,
+            c.requisicion,
+            c.unidad,
+            c.proveedor,
+            c.concepto,
+            c.transferencia,
+            c.relacion,
+            estados[c.estado],
+        ]);
 
     const elegidos = (grupo: string) => seleccion[grupo] ?? [];
     const alternar = (grupo: string, id: number) =>
@@ -294,174 +324,205 @@ export default function Index({
         filas: Clc[],
         conSeleccion: boolean,
         porRecibir = false,
-    ) => (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    {conSeleccion && (
-                        <TableHead className="w-8">
-                            <input
-                                type="checkbox"
-                                aria-label="Seleccionar todas"
-                                checked={
-                                    filas.length > 0 &&
-                                    elegidos(grupo).length === filas.length
-                                }
-                                onChange={(e) =>
-                                    fijar(
-                                        grupo,
-                                        e.target.checked
-                                            ? filas.map((f) => f.id)
-                                            : [],
-                                    )
-                                }
-                            />
-                        </TableHead>
-                    )}
-                    <TableHead>CLC</TableHead>
-                    <TableHead>O.C.</TableHead>
-                    <TableHead>Requisición</TableHead>
-                    <TableHead>Unidad administrativa</TableHead>
-                    <TableHead>Proveedor</TableHead>
-                    <TableHead className="text-right">Importe</TableHead>
-                    {porRecibir && <TableHead>Relación</TableHead>}
-                    {!conSeleccion && <TableHead>Estado</TableHead>}
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {filas.map((c) => (
-                    <TableRow
-                        key={c.id}
-                        className={
-                            elegidos(grupo).includes(c.id) ? 'bg-muted/50' : ''
-                        }
-                    >
-                        {conSeleccion && (
-                            <TableCell>
-                                <input
-                                    type="checkbox"
-                                    aria-label={`Seleccionar ${c.clc}`}
-                                    checked={elegidos(grupo).includes(c.id)}
-                                    onChange={() => alternar(grupo, c.id)}
-                                />
-                            </TableCell>
-                        )}
-                        <TableCell className="font-medium">
-                            {c.clc}
-                            {c.transferencia && (
-                                <div className="text-xs font-normal text-green-700 dark:text-green-400">
-                                    Transferencia {c.transferencia}
-                                </div>
-                            )}
-                            {c.devolucion && (
-                                <div className="mt-1 max-w-xs rounded bg-red-50 px-2 py-1 text-xs whitespace-normal text-red-800">
-                                    Devuelta: {c.devolucion}
-                                </div>
-                            )}
-                        </TableCell>
-                        <TableCell>{c.orden}</TableCell>
-                        <TableCell>
-                            <Link
-                                href={`/requisiciones/${c.requisicion_id}`}
-                                className="text-primary hover:underline"
-                            >
-                                {c.requisicion}
-                            </Link>
-                        </TableCell>
-                        <TableCell className="max-w-56 text-xs whitespace-normal">
-                            {c.unidad ?? '—'}
-                        </TableCell>
-                        <TableCell className="max-w-56 text-xs whitespace-normal">
-                            {c.proveedor ?? '—'}
-                            <div className="mt-1">
-                                <EstadoSat
-                                    orden={c}
-                                    compacto
-                                    puedeVerificar={puede(
-                                        'ordenes-compra-verificar-sat',
-                                    )}
-                                />
-                            </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                            {money(c.importe)}
-                        </TableCell>
-                        {porRecibir && (
-                            <TableCell>
-                                {c.relacion ? (
-                                    <button
-                                        type="button"
-                                        className="text-xs text-primary hover:underline"
-                                        title="Seleccionar todas las CLC de esta relación"
-                                        onClick={() =>
+    ) => {
+        const pag = paginar(filas, paginas[grupo] ?? 1);
+        const idsPagina = pag.filas.map((f) => f.id);
+        const paginaElegida =
+            idsPagina.length > 0 &&
+            idsPagina.every((id) => elegidos(grupo).includes(id));
+
+        return (
+            <>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            {conSeleccion && (
+                                <TableHead className="w-8">
+                                    <input
+                                        type="checkbox"
+                                        aria-label="Seleccionar las de esta página"
+                                        checked={paginaElegida}
+                                        onChange={(e) =>
                                             fijar(
                                                 grupo,
-                                                filas
-                                                    .filter(
-                                                        (f) =>
-                                                            f.relacion_id ===
-                                                            c.relacion_id,
-                                                    )
-                                                    .map((f) => f.id),
+                                                e.target.checked
+                                                    ? [
+                                                          ...new Set([
+                                                              ...elegidos(
+                                                                  grupo,
+                                                              ),
+                                                              ...idsPagina,
+                                                          ]),
+                                                      ]
+                                                    : elegidos(grupo).filter(
+                                                          (id) =>
+                                                              !idsPagina.includes(
+                                                                  id,
+                                                              ),
+                                                      ),
                                             )
                                         }
-                                    >
-                                        {c.relacion}
-                                    </button>
-                                ) : (
-                                    '—'
-                                )}
-                            </TableCell>
-                        )}
-                        {!conSeleccion && (
-                            <TableCell>
-                                <Badge
-                                    variant="secondary"
-                                    className={colorEstado(c.estado)}
+                                    />
+                                </TableHead>
+                            )}
+                            <TableHead>CLC</TableHead>
+                            <TableHead>O.C.</TableHead>
+                            <TableHead>Requisición</TableHead>
+                            <TableHead>Unidad administrativa</TableHead>
+                            <TableHead>Proveedor</TableHead>
+                            <TableHead className="text-right">
+                                Importe
+                            </TableHead>
+                            {porRecibir && <TableHead>Relación</TableHead>}
+                            {!conSeleccion && <TableHead>Estado</TableHead>}
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {filas.length === 0 && (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={9}
+                                    className="py-6 text-center text-muted-foreground"
                                 >
-                                    {estados[c.estado] ?? c.estado}
-                                </Badge>
-                                {c.pago_fecha && (
-                                    <div className="mt-1 text-xs text-muted-foreground">
-                                        Pagada el{' '}
-                                        {c.pago_fecha
-                                            .split('-')
-                                            .reverse()
-                                            .join('/')}
-                                    </div>
-                                )}
-                            </TableCell>
+                                    {terminos.length > 0
+                                        ? 'Ninguna CLC coincide con la búsqueda.'
+                                        : 'No hay CLC.'}
+                                </TableCell>
+                            </TableRow>
                         )}
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
-    );
+                        {pag.filas.map((c) => (
+                            <TableRow
+                                key={c.id}
+                                className={
+                                    elegidos(grupo).includes(c.id)
+                                        ? 'bg-muted/50'
+                                        : ''
+                                }
+                            >
+                                {conSeleccion && (
+                                    <TableCell>
+                                        <input
+                                            type="checkbox"
+                                            aria-label={`Seleccionar ${c.clc}`}
+                                            checked={elegidos(grupo).includes(
+                                                c.id,
+                                            )}
+                                            onChange={() =>
+                                                alternar(grupo, c.id)
+                                            }
+                                        />
+                                    </TableCell>
+                                )}
+                                <TableCell className="font-medium">
+                                    {c.clc}
+                                    {c.transferencia && (
+                                        <div className="text-xs font-normal text-green-700 dark:text-green-400">
+                                            Transferencia {c.transferencia}
+                                        </div>
+                                    )}
+                                    {c.devolucion && (
+                                        <div className="mt-1 max-w-xs rounded bg-red-50 px-2 py-1 text-xs whitespace-normal text-red-800">
+                                            Devuelta: {c.devolucion}
+                                        </div>
+                                    )}
+                                </TableCell>
+                                <TableCell>{c.orden}</TableCell>
+                                <TableCell>
+                                    <Link
+                                        href={`/requisiciones/${c.requisicion_id}`}
+                                        className="text-primary hover:underline"
+                                    >
+                                        {c.requisicion}
+                                    </Link>
+                                </TableCell>
+                                <TableCell className="max-w-56 text-xs whitespace-normal">
+                                    {c.unidad ?? '—'}
+                                </TableCell>
+                                <TableCell className="max-w-56 text-xs whitespace-normal">
+                                    {c.proveedor ?? '—'}
+                                    <div className="mt-1">
+                                        <EstadoSat
+                                            orden={c}
+                                            compacto
+                                            puedeVerificar={puede(
+                                                'ordenes-compra-verificar-sat',
+                                            )}
+                                        />
+                                    </div>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                    {money(c.importe)}
+                                </TableCell>
+                                {porRecibir && (
+                                    <TableCell>
+                                        {c.relacion ? (
+                                            <button
+                                                type="button"
+                                                className="text-xs text-primary hover:underline"
+                                                title="Seleccionar todas las CLC de esta relación"
+                                                onClick={() =>
+                                                    fijar(
+                                                        grupo,
+                                                        filas
+                                                            .filter(
+                                                                (f) =>
+                                                                    f.relacion_id ===
+                                                                    c.relacion_id,
+                                                            )
+                                                            .map((f) => f.id),
+                                                    )
+                                                }
+                                            >
+                                                {c.relacion}
+                                            </button>
+                                        ) : (
+                                            '—'
+                                        )}
+                                    </TableCell>
+                                )}
+                                {!conSeleccion && (
+                                    <TableCell>
+                                        <Badge
+                                            variant="secondary"
+                                            className={colorEstado(c.estado)}
+                                        >
+                                            {estados[c.estado] ?? c.estado}
+                                        </Badge>
+                                        {c.pago_fecha && (
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                                Pagada el{' '}
+                                                {c.pago_fecha
+                                                    .split('-')
+                                                    .reverse()
+                                                    .join('/')}
+                                            </div>
+                                        )}
+                                    </TableCell>
+                                )}
+                            </TableRow>
+                        ))}
+                    </TableBody>
+                </Table>
+                <Paginacion {...pag} onCambiar={(n) => irA(grupo, n)} />
+            </>
+        );
+    };
 
     const bandeja = bandejas.find((b) => b.clave === pestaña);
     const totalPagadas = clcs.filter(
         (c) => c.seguimiento && c.estado === 'pagada',
     ).length;
-    const terminos = buscar.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const seguimiento = clcs.filter(
         (c) =>
             c.seguimiento &&
             (filtroPago === 'todas' ||
                 (filtroPago === 'pagadas') === (c.estado === 'pagada')) &&
-            terminos.every((t) =>
-                [
-                    c.clc,
-                    c.orden,
-                    c.requisicion,
-                    c.unidad,
-                    c.proveedor,
-                    estados[c.estado],
-                ]
-                    .join(' ')
-                    .toLowerCase()
-                    .includes(t),
-            ),
+            coincideClc(c),
     );
+    const relacionesFiltradas = relaciones.filter((r) =>
+        coincide([r.folio, r.origen, r.destino, r.usuario]),
+    );
+    const pagRelaciones = paginar(relacionesFiltradas, paginas.relaciones ?? 1);
 
     return (
         <>
@@ -497,7 +558,7 @@ export default function Index({
                     </div>
                 )}
 
-                <div className="flex flex-wrap gap-1 border-b">
+                <div className="flex flex-wrap items-end gap-1 border-b">
                     {pestañas.map((p) => (
                         <button
                             key={p.clave}
@@ -508,14 +569,29 @@ export default function Index({
                             {p.titulo}
                         </button>
                     ))}
+                    <div className="relative mb-1.5 ml-auto w-full sm:w-80">
+                        <Search className="absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                            type="search"
+                            value={buscar}
+                            onChange={(e) => cambiarBusqueda(e.target.value)}
+                            placeholder="Buscar CLC, O.C., requisición, proveedor, unidad…"
+                            aria-label="Buscar CLC"
+                            className="w-full rounded-md border border-input bg-background py-1.5 pr-2 pl-7 text-sm"
+                        />
+                    </div>
                 </div>
 
                 {bandeja?.grupos.map((g, i) => {
                     const clave = `${bandeja.clave}-${i}`;
-                    const filas = clcs.filter((c) =>
+                    const enPaso = clcs.filter((c) =>
                         g.estados.includes(c.estado),
                     );
-                    const ids = elegidos(clave);
+                    const filas = enPaso.filter(coincideClc);
+                    // Solo cuentan las seleccionadas que siguen visibles con la búsqueda.
+                    const ids = elegidos(clave).filter((id) =>
+                        filas.some((f) => f.id === id),
+                    );
                     const total = filas
                         .filter((f) => ids.includes(f.id))
                         .reduce((s, f) => s + Number(f.importe), 0);
@@ -529,14 +605,18 @@ export default function Index({
                                 <CardTitle className="flex items-center gap-2 text-base">
                                     {g.titulo}
                                     <Badge variant="secondary">
-                                        {filas.length}
+                                        {terminos.length > 0
+                                            ? `${filas.length} de ${enPaso.length}`
+                                            : enPaso.length}
                                     </Badge>
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
                                 {filas.length === 0 ? (
                                     <p className="py-4 text-center text-sm text-muted-foreground">
-                                        No hay CLC en este paso.
+                                        {enPaso.length === 0
+                                            ? 'No hay CLC en este paso.'
+                                            : 'Ninguna CLC de este paso coincide con la búsqueda.'}
                                     </p>
                                 ) : (
                                     <>
@@ -628,23 +708,15 @@ export default function Index({
                                         <button
                                             key={valor}
                                             type="button"
-                                            onClick={() => setFiltroPago(valor)}
+                                            onClick={() => {
+                                                setFiltroPago(valor);
+                                                irA('seguimiento', 1);
+                                            }}
                                             className={`px-2.5 py-1 first:rounded-l-md last:rounded-r-md ${filtroPago === valor ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
                                         >
                                             {etiqueta}
                                         </button>
                                     ))}
-                                </div>
-                                <div className="relative">
-                                    <Search className="absolute top-1/2 left-2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                                    <input
-                                        value={buscar}
-                                        onChange={(e) =>
-                                            setBuscar(e.target.value)
-                                        }
-                                        placeholder="CLC, O.C., requisición, proveedor, estado…"
-                                        className="w-72 rounded-md border border-input py-1 pr-2 pl-7 text-sm font-normal"
-                                    />
                                 </div>
                             </CardTitle>
                         </CardHeader>
@@ -676,17 +748,19 @@ export default function Index({
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {relaciones.length === 0 && (
+                                    {relacionesFiltradas.length === 0 && (
                                         <TableRow>
                                             <TableCell
                                                 colSpan={6}
                                                 className="text-center text-muted-foreground"
                                             >
-                                                Todavía no hay relaciones.
+                                                {relaciones.length === 0
+                                                    ? 'Todavía no hay relaciones.'
+                                                    : 'Ninguna relación coincide con la búsqueda.'}
                                             </TableCell>
                                         </TableRow>
                                     )}
-                                    {relaciones.map((r) => (
+                                    {pagRelaciones.filas.map((r) => (
                                         <TableRow key={r.id}>
                                             <TableCell className="font-medium">
                                                 {r.folio}
@@ -722,6 +796,10 @@ export default function Index({
                                     ))}
                                 </TableBody>
                             </Table>
+                            <Paginacion
+                                {...pagRelaciones}
+                                onCambiar={(n) => irA('relaciones', n)}
+                            />
                         </CardContent>
                     </Card>
                 )}
