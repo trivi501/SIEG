@@ -344,7 +344,7 @@ class EgresoRequisicionController extends Controller
 
     public function show(EgresoRequisicion $requisicion)
     {
-        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'ordenCompra.movimientosClc.usuario:id,name', 'extemporaneaAutorizador:id,name', 'canceladaPor:id,name');
+        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'ordenCompra.movimientosClc.usuario:id,name', 'ordenCompra.canceladaPor:id,name', 'ordenCompra.clcCanceladaPor:id,name', 'extemporaneaAutorizador:id,name', 'canceladaPor:id,name');
 
         $this->autorizarUnidad($requisicion);
 
@@ -379,9 +379,17 @@ class EgresoRequisicionController extends Controller
             'puedeCambiarFecha' => $this->puedeCambiarFecha($requisicion),
             'puedeCancelar' => $this->puedeCancelar($requisicion),
             'estadosClc' => collect(TramiteClc::ESTADOS)->map(fn ($e) => $e[0]),
-            'puedeCambiarFechaOrden' => $user->can('ordenes-compra-fecha'),
-            'proveedores' => $user->can('ordenes-compra-create') && $requisicion->id_cat_egreso_requisicion_estado === EgresoRequisicion::COMPROMETIDA && ! $requisicion->ordenCompra
-                ? Proveedor::where('activo', true)->orderBy('nombre')->get(['id', 'nombre', 'rfc'])
+            'puedeCambiarFechaOrden' => $user->can('ordenes-compra-fecha') && ! $requisicion->ordenCompra?->cancelada_at,
+            // Cancelación escalonada: primero la CLC, luego la orden de compra (puedeCancelar es la requisición).
+            'puedeCancelarClc' => $user->can('clc-cancelar') && (bool) $requisicion->ordenCompra?->clcActiva(),
+            'puedeCancelarOrden' => $user->can('ordenes-compra-cancelar') && $requisicion->ordenCompra
+                && ! $requisicion->ordenCompra->cancelada_at && ! $requisicion->ordenCompra->clcActiva(),
+            // Para generar la orden de compra o reasignar su proveedor (mientras no tenga factura).
+            'proveedores' => $user->can('ordenes-compra-create') && (
+                ($requisicion->id_cat_egreso_requisicion_estado === EgresoRequisicion::COMPROMETIDA && ! $requisicion->ordenCompra)
+                || ($requisicion->ordenCompra && ! $requisicion->ordenCompra->xml_uuid && ! $requisicion->ordenCompra->cancelada_at))
+                ? Proveedor::where('activo', true)->orderBy('nombre')->get(['id', 'nombre', 'rfc', 'vigencia'])
+                    ->map(fn (Proveedor $p) => [...$p->only('id', 'nombre', 'rfc'), 'vigencia' => $p->vigencia?->format('d/m/Y'), 'vencido' => ! $p->vigente()])
                 : [],
             'modificaciones' => ModificacionPresupuestal::where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)
                 ->orderByDesc('id')
@@ -625,7 +633,16 @@ class EgresoRequisicionController extends Controller
     private function puedeCancelar(EgresoRequisicion $requisicion): bool
     {
         $estado = (int) $requisicion->id_cat_egreso_requisicion_estado;
-        if (! in_array($estado, EgresoRequisicion::CANCELABLES, true) || $requisicion->ordenCompra()->exists()) {
+        if ($estado === EgresoRequisicion::CANCELADA) {
+            return false;
+        }
+
+        // Con orden de compra se cancela de lo último a lo primero: CLC, orden de compra y al final la requisición.
+        $orden = $requisicion->ordenCompra;
+        if ($orden) {
+            return $orden->cancelada_at !== null && auth()->user()->can('requisiciones-cancelar');
+        }
+        if (! in_array($estado, EgresoRequisicion::CANCELABLES, true)) {
             return false;
         }
 
@@ -970,8 +987,8 @@ class EgresoRequisicionController extends Controller
                     'estado' => $r->catEgresoRequisicionEstado?->descripcion,
                     'momento' => match (true) {
                         in_array($estado, [4, EgresoRequisicion::CANCELADA], true) => null,
-                        (bool) $oc?->pago_fecha => 'Pagado',
-                        (bool) $oc?->xml_uuid => 'Devengado',
+                        $oc && ! $oc->cancelada_at && ! $oc->clc_cancelada_at && $oc->pago_fecha => 'Pagado',
+                        $oc && ! $oc->cancelada_at && $oc->xml_uuid => 'Devengado',
                         (bool) $r->suficiencia => 'Comprometido',
                         default => 'En trámite',
                     },
@@ -989,7 +1006,8 @@ class EgresoRequisicionController extends Controller
                         'clc' => $oc->clc_folio_completo,
                         'clc_fecha' => $oc->clc_fecha?->format('Y-m-d'),
                         'clc_estado' => $oc->clc_folio_completo ? TramiteClc::descripcion($oc->clc_estado) : null,
-                        'pago_fecha' => $oc->pago_fecha?->format('Y-m-d'),
+                        'pago_fecha' => $oc->clc_cancelada_at ? null : $oc->pago_fecha?->format('Y-m-d'),
+                        'cancelada' => $oc->cancelada_at !== null,
                     ] : null,
                 ];
             })->values();

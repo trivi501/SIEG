@@ -14,6 +14,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { fechaLocal } from '@/lib/presupuesto';
 
 type User = {
     id: number;
@@ -133,7 +134,9 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                         <TableCell>
                                             {user.email_verified_at ? (
                                                 <Badge variant="secondary">
-                                                    {user.email_verified_at}
+                                                    {fechaLocal(
+                                                        user.email_verified_at,
+                                                    )}
                                                 </Badge>
                                             ) : (
                                                 <Badge variant="outline">
@@ -161,7 +164,7 @@ export default function Index({ users }: { users: PaginatedData<User> }) {
                                             </div>
                                         </TableCell>
                                         <TableCell className="text-muted-foreground">
-                                            {user.created_at}
+                                            {fechaLocal(user.created_at)}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">

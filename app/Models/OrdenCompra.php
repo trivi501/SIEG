@@ -14,11 +14,12 @@ class OrdenCompra extends Model
     protected $fillable = [
         'id_tb_egreso_requisicion', 'proveedor_id', 'folio', 'año', 'folio_completo', 'fecha', 'importe',
         'observaciones', 'user_id', 'xml_path', 'xml_uuid', 'xml_rfc_emisor', 'xml_nombre_emisor',
-        'xml_serie', 'xml_folio', 'xml_fecha', 'xml_subtotal', 'xml_total', 'xml_cargado_at', 'xml_user_id',
+        'xml_serie', 'xml_folio', 'xml_fecha', 'xml_subtotal', 'xml_total', 'xml_isr', 'xml_cargado_at', 'xml_user_id',
         'sat_estado', 'sat_estatus_cancelacion', 'sat_efos', 'sat_verificado_at',
         'pago_fecha', 'pago_forma', 'pago_referencia', 'pago_user_id', 'pago_registrado_at',
         'transferencia_folio', 'transferencia_año', 'transferencia_numero',
         'clc_folio', 'clc_año', 'clc_folio_completo', 'clc_fecha', 'clc_user_id', 'clc_generada_at', 'clc_estado', 'clc_relacion_id',
+        'clc_cancelada_at', 'clc_cancelada_user_id', 'clc_motivo_cancelacion', 'cancelada_at', 'cancelada_user_id', 'motivo_cancelacion',
     ];
 
     public const FORMAS_PAGO = ['transferencia' => 'Transferencia', 'cheque' => 'Cheque'];
@@ -33,6 +34,7 @@ class OrdenCompra extends Model
             'xml_fecha' => 'datetime',
             'xml_subtotal' => 'float',
             'xml_total' => 'float',
+            'xml_isr' => 'float',
             'xml_cargado_at' => 'datetime',
             'sat_efos' => 'boolean',
             'sat_verificado_at' => 'datetime',
@@ -40,6 +42,8 @@ class OrdenCompra extends Model
             'pago_registrado_at' => 'datetime',
             'clc_fecha' => 'date:Y-m-d',
             'clc_generada_at' => 'datetime',
+            'clc_cancelada_at' => 'datetime',
+            'cancelada_at' => 'datetime',
         ];
     }
 
@@ -61,6 +65,31 @@ class OrdenCompra extends Model
     public function relacionClc()
     {
         return $this->belongsTo(ClcRelacion::class, 'clc_relacion_id');
+    }
+
+    /**
+     * Lo que se le paga al proveedor: el importe menos el ISR retenido en la factura (el importe del gasto
+     * no cambia por la retención).
+     */
+    public function netoAPagar(): float
+    {
+        return round((float) $this->importe - (float) ($this->xml_isr ?? 0), 2);
+    }
+
+    /** La CLC está generada y no se ha cancelado. */
+    public function clcActiva(): bool
+    {
+        return $this->clc_folio_completo !== null && $this->clc_cancelada_at === null;
+    }
+
+    public function canceladaPor()
+    {
+        return $this->belongsTo(User::class, 'cancelada_user_id');
+    }
+
+    public function clcCanceladaPor()
+    {
+        return $this->belongsTo(User::class, 'clc_cancelada_user_id');
     }
 
     public function usuario()

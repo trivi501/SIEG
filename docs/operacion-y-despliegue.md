@@ -38,7 +38,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: text/xml; cha
 
 Debe imprimir `200`. (`curl -I` da 404 aunque el servicio funcione: el SAT solo responde a la consulta SOAP).
 
-Si el SAT no responde, la carga y el pago continúan con aviso y el motivo queda en `storage/logs/laravel.log` ("Consulta de CFDI … al SAT"). En Windows/Laragon, PHP necesita `curl.cainfo` apuntando a un `cacert.pem` en `php.ini` (error "cURL error 60").
+Si el SAT no responde, la factura no se acepta (se reintenta la carga) y el pago continúa y el motivo queda en `storage/logs/laravel.log` ("Consulta de CFDI … al SAT"). En Windows/Laragon, PHP necesita `curl.cainfo` apuntando a un `cacert.pem` en `php.ini` (error "cURL error 60").
 
 ## Procesos
 

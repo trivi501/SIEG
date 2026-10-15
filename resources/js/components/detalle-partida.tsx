@@ -17,7 +17,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { fechaLocal, money } from '@/lib/presupuesto';
+import { fecha, fechaLocal, money } from '@/lib/presupuesto';
 import type { LineaPresupuesto } from '@/lib/presupuesto';
 
 interface RequisicionPartida {
@@ -42,6 +42,7 @@ interface RequisicionPartida {
         clc_fecha: string | null;
         clc_estado: string | null;
         pago_fecha: string | null;
+        cancelada: boolean;
     } | null;
 }
 
@@ -64,8 +65,7 @@ interface Detalle {
 }
 
 /** Fecha guardada como Y-m-d (o Y-m-d H:i:s de MySQL) en dd/mm/aaaa, sin cambiar de zona. */
-const dia = (valor: string | null | undefined) =>
-    valor ? valor.slice(0, 10).split('-').reverse().join('/') : '—';
+const dia = (valor: string | null | undefined) => fecha(valor);
 
 const coloresMomento: Record<string, string> = {
     'En trámite': 'bg-slate-100 text-slate-700',
@@ -280,6 +280,12 @@ export default function DetallePartida({
                                                         <>
                                                             <div className="font-medium">
                                                                 {r.orden.folio}
+                                                                {r.orden
+                                                                    .cancelada && (
+                                                                    <span className="ml-1 font-normal text-red-700">
+                                                                        (cancelada)
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                             <div className="text-muted-foreground">
                                                                 {dia(

@@ -177,6 +177,10 @@ class PresupuestoService
     private function ejercidoPorClave(?int $excluirRequisicion): array
     {
         $conPago = Schema::hasColumn('ordenes_compra', 'pago_fecha');
+        // Una orden de compra cancelada ya no devenga y una CLC cancelada ya no cuenta como pagada: el
+        // importe regresa a comprometido hasta que se cancela la requisición.
+        [$ocVigente, $clcVigente] = Schema::hasColumn('ordenes_compra', 'cancelada_at')
+            ? [' AND oc.cancelada_at IS NULL', ' AND oc.clc_cancelada_at IS NULL'] : ['', ''];
 
         $filas = DB::table('tb_egreso_requisicion_detalle as d')
             ->join('tb_egreso_requisicion as r', 'r.id_tb_egreso_requisicion', '=', 'd.id_tb_egreso_requisicion')
@@ -185,8 +189,8 @@ class PresupuestoService
             ->whereNotIn('r.id_cat_egreso_requisicion_estado', [4, EgresoRequisicion::CANCELADA]) // rechazada o cancelada no compromete presupuesto
             ->when($excluirRequisicion, fn ($q) => $q->where('r.id_tb_egreso_requisicion', '!=', $excluirRequisicion))
             ->selectRaw('u.clave, d.fuente, d.proyecto, d.partida, r.suficiencia,
-                CASE WHEN oc.xml_uuid IS NOT NULL THEN 1 ELSE 0 END as devengado,
-                '.($conPago ? 'CASE WHEN oc.pago_fecha IS NOT NULL THEN 1 ELSE 0 END' : '0').' as pagado,
+                CASE WHEN oc.xml_uuid IS NOT NULL'.$ocVigente.' THEN 1 ELSE 0 END as devengado,
+                '.($conPago ? 'CASE WHEN oc.pago_fecha IS NOT NULL'.$ocVigente.$clcVigente.' THEN 1 ELSE 0 END' : '0').' as pagado,
                 SUM(COALESCE(d.total, d.sub_total, 0)) as monto')
             ->groupBy('u.clave', 'd.fuente', 'd.proyecto', 'd.partida', 'r.suficiencia', 'devengado', 'pagado')
             ->get();

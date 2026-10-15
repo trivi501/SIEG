@@ -14,6 +14,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { fechaLocal } from '@/lib/presupuesto';
 
 type Permission = {
     id: number;
@@ -64,8 +65,8 @@ export default function Index({
         const params: Record<string, string> = {};
         Object.entries(columnFilters).forEach(([key, val]) => {
             if (val) {
-params[key] = val;
-}
+                params[key] = val;
+            }
         });
         router.get('/settings/permissions', params, {
             preserveState: true,
@@ -244,7 +245,7 @@ params[key] = val;
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-muted-foreground">
-                                            {permission.created_at}
+                                            {fechaLocal(permission.created_at)}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-2">

@@ -24,7 +24,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
-import { fechaLocal, money } from '@/lib/presupuesto';
+import { fecha, fechaLocal, money } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -39,6 +39,8 @@ interface Clc extends EstadoSatFactura {
     estado: string;
     orden: string;
     importe: number;
+    isr: number;
+    neto: number;
     proveedor: string | null;
     requisicion_id: number;
     requisicion: string | null;
@@ -48,6 +50,7 @@ interface Clc extends EstadoSatFactura {
     relacion_id: number | null;
     transferencia: string | null;
     pago_fecha: string | null;
+    cancelacion: string | null;
     devolucion: string | null;
     seguimiento: boolean;
 }
@@ -183,7 +186,7 @@ const BANDEJAS: Bandeja[] = [
 const colorEstado = (estado: string) =>
     estado === 'pagada'
         ? 'bg-green-100 text-green-800'
-        : estado === 'devuelta'
+        : estado === 'devuelta' || estado === 'cancelada'
           ? 'bg-red-100 text-red-800'
           : estado.startsWith('enviada')
             ? 'bg-amber-100 text-amber-900'
@@ -241,7 +244,7 @@ export default function Index({
     const [ultimaRelacion, setUltimaRelacion] = useState<Relacion | null>(null);
     const [buscar, setBuscar] = useState('');
     const [filtroPago, setFiltroPago] = useState<
-        'todas' | 'tramite' | 'pagadas'
+        'todas' | 'tramite' | 'pagadas' | 'canceladas'
     >('todas');
     // Página de cada tabla (bandeja, seguimiento, relaciones); la búsqueda regresa a la primera.
     const [paginas, setPaginas] = useState<Record<string, number>>({});
@@ -452,6 +455,12 @@ export default function Index({
                                 </TableCell>
                                 <TableCell className="text-right">
                                     {money(c.importe)}
+                                    {c.isr > 0 && (
+                                        <div className="text-xs whitespace-nowrap text-muted-foreground">
+                                            ISR −{money(c.isr)} · a pagar{' '}
+                                            {money(c.neto)}
+                                        </div>
+                                    )}
                                 </TableCell>
                                 {porRecibir && (
                                     <TableCell>
@@ -489,12 +498,15 @@ export default function Index({
                                             {estados[c.estado] ?? c.estado}
                                         </Badge>
                                         {c.pago_fecha && (
-                                            <div className="mt-1 text-xs text-muted-foreground">
-                                                Pagada el{' '}
-                                                {c.pago_fecha
-                                                    .split('-')
-                                                    .reverse()
-                                                    .join('/')}
+                                            <div
+                                                className={`mt-1 text-xs text-muted-foreground ${c.cancelacion ? 'line-through' : ''}`}
+                                            >
+                                                Pagada el {fecha(c.pago_fecha)}
+                                            </div>
+                                        )}
+                                        {c.cancelacion && (
+                                            <div className="mt-1 max-w-56 text-xs whitespace-normal text-red-800">
+                                                Motivo: {c.cancelacion}
                                             </div>
                                         )}
                                     </TableCell>
@@ -512,12 +524,18 @@ export default function Index({
     const totalPagadas = clcs.filter(
         (c) => c.seguimiento && c.estado === 'pagada',
     ).length;
+    const totalCanceladas = clcs.filter(
+        (c) => c.seguimiento && c.estado === 'cancelada',
+    ).length;
+    const enFiltro = (estado: string) =>
+        filtroPago === 'todas' ||
+        (filtroPago === 'pagadas' && estado === 'pagada') ||
+        (filtroPago === 'canceladas' && estado === 'cancelada') ||
+        (filtroPago === 'tramite' &&
+            estado !== 'pagada' &&
+            estado !== 'cancelada');
     const seguimiento = clcs.filter(
-        (c) =>
-            c.seguimiento &&
-            (filtroPago === 'todas' ||
-                (filtroPago === 'pagadas') === (c.estado === 'pagada')) &&
-            coincideClc(c),
+        (c) => c.seguimiento && enFiltro(c.estado) && coincideClc(c),
     );
     const relacionesFiltradas = relaciones.filter((r) =>
         coincide([r.folio, r.origen, r.destino, r.usuario]),
@@ -702,6 +720,10 @@ export default function Index({
                                             [
                                                 'pagadas',
                                                 `Pagadas (${totalPagadas})`,
+                                            ],
+                                            [
+                                                'canceladas',
+                                                `Canceladas (${totalCanceladas})`,
                                             ],
                                         ] as const
                                     ).map(([valor, etiqueta]) => (
@@ -911,6 +933,8 @@ function PagoDialog({
     const [errores, setErrores] = useState<string[]>([]);
     const [guardando, setGuardando] = useState(false);
     const total = clcs.reduce((s, c) => s + Number(c.importe), 0);
+    const isr = clcs.reduce((s, c) => s + Number(c.isr), 0);
+    const neto = clcs.reduce((s, c) => s + Number(c.neto), 0);
     const esTransferencia = pago.pago_forma === 'transferencia';
 
     const guardar = (e: React.FormEvent) => {
@@ -946,8 +970,15 @@ function PagoDialog({
                     </DialogHeader>
                     <div className="rounded-lg border bg-muted/40 p-4 text-sm">
                         <p className="text-lg font-semibold">
-                            {clcs.length} CLC · {money(total)}
+                            {clcs.length} CLC · A pagar {money(neto)}
                         </p>
+                        {isr > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                                Importe {money(total)} − ISR retenido{' '}
+                                {money(isr)} (la retención no cambia el importe
+                                del gasto)
+                            </p>
+                        )}
                         <p className="mt-1 text-xs text-muted-foreground">
                             {clcs
                                 .map((c) => `${c.clc} (${c.proveedor ?? '—'})`)

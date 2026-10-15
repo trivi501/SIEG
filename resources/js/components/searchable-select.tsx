@@ -128,13 +128,16 @@ export default function SearchableSelect({
     const selected = options.find((o) => o.value === value);
     const texto = (o: SearchableOption) =>
         showValue ? `${o.value}${o.label ? ` - ${o.label}` : ''}` : o.label;
-    const q = query.trim().toLowerCase();
+    // Sin distinguir mayúsculas ni acentos ("tesoreria" encuentra "TESORERÍA").
+    const normalizar = (s: string) =>
+        s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const q = normalizar(query.trim());
     const filtered = q
         ? options.filter((o) =>
               q
                   .split(/\s+/)
                   .every((t) =>
-                      `${o.value} ${o.label}`.toLowerCase().includes(t),
+                      normalizar(`${o.value} ${o.label}`).includes(t),
                   ),
           )
         : options;

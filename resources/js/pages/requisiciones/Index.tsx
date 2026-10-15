@@ -14,6 +14,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { fecha } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -400,7 +401,7 @@ export default function Index({
                                             {req.observaciones || '—'}
                                         </TableCell>
                                         <TableCell className="text-xs text-muted-foreground">
-                                            {req.registro ?? '—'}
+                                            {fecha(req.registro, true)}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex items-center gap-1">
@@ -411,6 +412,7 @@ export default function Index({
                                                 >
                                                     <Link
                                                         href={`/requisiciones/${req.id_tb_egreso_requisicion}`}
+                                                        title="Ver requisición"
                                                     >
                                                         <Eye className="h-4 w-4" />
                                                     </Link>
@@ -426,6 +428,7 @@ export default function Index({
                                                     >
                                                         <Link
                                                             href={`/requisiciones/${req.id_tb_egreso_requisicion}/edit`}
+                                                            title="Editar"
                                                         >
                                                             <Pencil className="h-4 w-4" />
                                                         </Link>
@@ -457,6 +460,7 @@ export default function Index({
                                                         <a
                                                             href={`/requisiciones/${req.id_tb_egreso_requisicion}/pdf`}
                                                             target="_blank"
+                                                            title="Imprimir formato (PDF)"
                                                         >
                                                             <Download className="h-4 w-4" />
                                                         </a>

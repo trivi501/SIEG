@@ -3,6 +3,7 @@ import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 import { useRef } from 'react';
 import LineaPresupuestoCeldas from '@/components/linea-presupuesto-celdas';
 import type { SeleccionLinea } from '@/components/linea-presupuesto-celdas';
+import SearchableSelect from '@/components/searchable-select';
 import { Button } from '@/components/ui/button';
 import { money } from '@/lib/presupuesto';
 import type { LineaPresupuesto } from '@/lib/presupuesto';
@@ -225,25 +226,26 @@ export default function Edit({
                                 {unidad?.nombre ?? '—'}
                             </span>
                         ) : (
-                            <select
-                                value={data.id_cat_egreso_unidad_administrativa}
-                                onChange={(e) => cambiarUnidad(e.target.value)}
-                                className="block w-full max-w-xl rounded-md border-input px-3 py-2 text-sm shadow-sm"
-                            >
-                                <option value="">Seleccionar...</option>
-                                {catalogs.unidades.map((u) => (
-                                    <option
-                                        key={
-                                            u.id_cat_egreso_unidad_administrativa
-                                        }
-                                        value={
-                                            u.id_cat_egreso_unidad_administrativa
-                                        }
-                                    >
-                                        {u.nombre}
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="w-full max-w-xl">
+                                <SearchableSelect
+                                    value={String(
+                                        data.id_cat_egreso_unidad_administrativa ??
+                                            '',
+                                    )}
+                                    onChange={cambiarUnidad}
+                                    options={catalogs.unidades.map((u) => ({
+                                        value: String(
+                                            u.id_cat_egreso_unidad_administrativa,
+                                        ),
+                                        label: u.clave
+                                            ? `${u.clave} - ${u.nombre}`
+                                            : u.nombre,
+                                    }))}
+                                    placeholder="Escribe o elige la dirección o unidad…"
+                                    showValue={false}
+                                    panelWidth={520}
+                                />
+                            </div>
                         )}
                     </div>
 

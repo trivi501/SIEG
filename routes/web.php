@@ -87,7 +87,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('clc/relaciones/{relacion}/pdf', [ClcController::class, 'relacionPdf'])->name('clc.relacion.pdf')->middleware('permission:clc-index');
     Route::post('ordenes-compra/{ordenCompra}/pago', [OrdenCompraController::class, 'registrarPago'])->name('ordenes-compra.pago')->middleware('permission:ordenes-compra-pagar');
     Route::get('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'descargarXml'])->name('ordenes-compra.xml.descargar')->middleware('permission:requisiciones-index');
+    Route::post('ordenes-compra/{ordenCompra}/proveedor', [OrdenCompraController::class, 'cambiarProveedor'])->name('ordenes-compra.proveedor')->middleware('permission:ordenes-compra-create');
     Route::post('ordenes-compra/{ordenCompra}/fecha', [OrdenCompraController::class, 'cambiarFecha'])->name('ordenes-compra.fecha')->middleware('permission:ordenes-compra-fecha');
+    // Cancelación escalonada: CLC → orden de compra → requisición (requisiciones.cancelar).
+    Route::post('ordenes-compra/{ordenCompra}/cancelar-clc', [OrdenCompraController::class, 'cancelarClc'])->name('ordenes-compra.cancelar-clc')->middleware('permission:clc-cancelar');
+    Route::post('ordenes-compra/{ordenCompra}/cancelar', [OrdenCompraController::class, 'cancelar'])->name('ordenes-compra.cancelar')->middleware('permission:ordenes-compra-cancelar');
     Route::post('ordenes-compra/{ordenCompra}/verificar-sat', [OrdenCompraController::class, 'verificarSat'])->name('ordenes-compra.verificar-sat')->middleware('permission:ordenes-compra-verificar-sat');
     Route::post('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'generarClc'])->name('ordenes-compra.clc')->middleware('permission:requisiciones-clc');
     Route::get('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'clcPdf'])->name('ordenes-compra.clc.pdf')->middleware('permission:requisiciones-index');

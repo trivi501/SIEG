@@ -47,6 +47,9 @@ class ClcController extends Controller
                 'estado' => $o->clc_estado,
                 'orden' => $o->folio_completo,
                 'importe' => $o->importe,
+                // ISR retenido en la factura: no cambia el importe; al proveedor se le paga importe − ISR.
+                'isr' => (float) ($o->xml_isr ?? 0),
+                'neto' => $o->netoAPagar(),
                 'proveedor' => $o->proveedor?->nombre,
                 'requisicion_id' => $o->id_tb_egreso_requisicion,
                 'requisicion' => $o->requisicion?->folio_completo,
@@ -57,6 +60,7 @@ class ClcController extends Controller
                 'relacion' => $o->relacionClc?->folio_completo,
                 'pago_fecha' => $o->pago_fecha?->toDateString(),
                 'transferencia' => $o->transferencia_numero,
+                'cancelacion' => $o->clc_cancelada_at ? $o->clc_motivo_cancelacion : null,
                 'sat_estado' => $o->sat_estado,
                 'sat_estatus_cancelacion' => $o->sat_estatus_cancelacion,
                 'sat_efos' => $o->sat_efos,

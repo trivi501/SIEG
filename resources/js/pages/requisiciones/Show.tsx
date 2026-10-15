@@ -2,6 +2,7 @@ import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import {
     ArrowLeft,
     CheckCircle2,
+    ChevronDown,
     FileText,
     Pencil,
     Send,
@@ -25,7 +26,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { fechaLocal, money, numero } from '@/lib/presupuesto';
+import { fecha, fechaLocal, money, numero } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -165,7 +166,9 @@ type Accion =
     | 'suficiencia'
     | 'extemporanea'
     | 'clc'
-    | 'cancelar';
+    | 'cancelar'
+    | 'cancelar_clc'
+    | 'cancelar_orden';
 
 export default function Show({
     requisicion,
@@ -177,6 +180,8 @@ export default function Show({
     puedeCambiarFecha,
     puedeCambiarFechaOrden,
     puedeCancelar,
+    puedeCancelarClc,
+    puedeCancelarOrden,
     estadosClc,
     proveedores,
     modificaciones,
@@ -190,8 +195,16 @@ export default function Show({
     puedeCambiarFecha: boolean;
     puedeCambiarFechaOrden: boolean;
     puedeCancelar: boolean;
+    puedeCancelarClc: boolean;
+    puedeCancelarOrden: boolean;
     estadosClc: Record<string, string>;
-    proveedores: { id: number; nombre: string; rfc: string | null }[];
+    proveedores: {
+        id: number;
+        nombre: string;
+        rfc: string | null;
+        vigencia: string | null;
+        vencido: boolean;
+    }[];
     modificaciones: Modificacion[];
 }) {
     const detalles = requisicion.tb_egreso_requisicion_detalles ?? [];
@@ -213,6 +226,37 @@ export default function Show({
     const [accion, setAccion] = useState<Accion | null>(null);
     const [showResultado, setShowResultado] = useState(false);
     const [showOrden, setShowOrden] = useState(false);
+    const opcionesProveedor = proveedores.map((p) => ({
+        value: String(p.id),
+        label: p.rfc ? `${p.nombre} (${p.rfc})` : p.nombre,
+        hint: p.vencido
+            ? `Vigencia vencida (${p.vigencia})`
+            : p.vigencia
+              ? `Vigente al ${p.vigencia}`
+              : undefined,
+    }));
+    // Reasignar el proveedor de la orden de compra mientras no tenga factura.
+    const [nuevoProveedorOrden, setNuevoProveedorOrden] = useState<
+        string | null
+    >(null);
+    const [errorProveedorOrden, setErrorProveedorOrden] = useState<
+        string | null
+    >(null);
+    const guardarProveedorOrden = () =>
+        router.post(
+            `/ordenes-compra/${orden?.id}/proveedor`,
+            { proveedor_id: nuevoProveedorOrden },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setNuevoProveedorOrden(null);
+                    setErrorProveedorOrden(null);
+                },
+                onError: (e) => setErrorProveedorOrden(e.proveedor_id ?? null),
+            },
+        );
+    // La bitácora inicia cerrada para que no ocupe espacio; muestra su último movimiento.
+    const [verBitacora, setVerBitacora] = useState(false);
     const [editarFecha, setEditarFecha] = useState<
         'requisicion' | 'orden' | null
     >(null);
@@ -421,10 +465,47 @@ export default function Show({
             a: 'En revisión',
             ejecutar: (_, op) => post('autorizar-extemporanea', op),
         },
+        cancelar_clc: {
+            titulo: `Cancelar ${orden?.clc_folio_completo ?? 'CLC'}`,
+            descripcion: `Sale del trámite de CLC${orden?.pago_fecha ? ' y su pago queda anulado (deja de contar como pagado)' : ''}. Es el primer paso: después sigue cancelar la orden de compra y al final la requisición, que es cuando el presupuesto regresa al mes vigente. No se puede deshacer.`,
+            tono: 'peligro',
+            textoConfirmar: 'Cancelar CLC',
+            motivo: {
+                etiqueta: 'Motivo de la cancelación',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Por qué se cancela la CLC…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(
+                    `/ordenes-compra/${orden?.id}/cancelar-clc`,
+                    { motivo },
+                    op,
+                ),
+        },
+        cancelar_orden: {
+            titulo: `Cancelar orden de compra ${orden?.folio_completo ?? ''}`,
+            descripcion: `Se cancela con su factura${orden?.xml_uuid ? ' (deja de contar como devengado)' : ''}. Después sigue cancelar la requisición, que es cuando el presupuesto regresa al mes vigente. No se puede deshacer.`,
+            tono: 'peligro',
+            textoConfirmar: 'Cancelar orden de compra',
+            a: 'Comprometida',
+            motivo: {
+                etiqueta: 'Motivo de la cancelación',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Por qué se cancela la orden de compra…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(
+                    `/ordenes-compra/${orden?.id}/cancelar`,
+                    { motivo },
+                    op,
+                ),
+        },
         cancelar: {
             titulo: 'Cancelar requisición',
             descripcion:
-                'Ya no seguirá su trámite y deja de contar en el presupuesto (en trámite o comprometido). Esta acción no se puede deshacer.',
+                'Ya no seguirá su trámite y su importe deja de contar en el presupuesto: regresa al disponible del mes vigente (el mes en que se cancela), no al de la requisición. Esta acción no se puede deshacer.',
             tono: 'peligro',
             textoConfirmar: 'Cancelar requisición',
             a: 'Cancelada',
@@ -565,12 +646,7 @@ export default function Show({
                                 <span className="font-semibold">
                                     Fecha de trámite:
                                 </span>{' '}
-                                {requisicion.solicitado
-                                    ? String(requisicion.solicitado).slice(
-                                          0,
-                                          10,
-                                      )
-                                    : '—'}{' '}
+                                {fecha(requisicion.solicitado)}{' '}
                                 {puedeCambiarFecha && (
                                     <button
                                         type="button"
@@ -586,7 +662,7 @@ export default function Show({
                             </div>
                             <div>
                                 <span className="font-semibold">Registro:</span>{' '}
-                                {requisicion.registro ?? '—'}
+                                {fecha(requisicion.registro, true)}
                             </div>
                             <div>
                                 <span className="font-semibold">
@@ -776,11 +852,65 @@ export default function Show({
                     {orden && (
                         <Card>
                             <CardHeader>
-                                <CardTitle>
+                                <CardTitle className="flex items-center gap-2">
                                     Orden de Compra {orden.folio_completo}
+                                    {orden.cancelada_at && (
+                                        <Badge className="bg-red-100 text-red-800">
+                                            Cancelada
+                                        </Badge>
+                                    )}
                                 </CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4 text-sm">
+                                {orden.clc_cancelada_at && (
+                                    <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-900">
+                                        <p className="flex items-center gap-2 font-semibold">
+                                            <XCircle className="h-4 w-4" /> CLC{' '}
+                                            {orden.clc_folio_completo} cancelada
+                                        </p>
+                                        <p className="mt-1">
+                                            Por{' '}
+                                            {orden.clc_cancelada_por?.name ??
+                                                '—'}{' '}
+                                            el{' '}
+                                            {fechaLocal(orden.clc_cancelada_at)}
+                                            .{' '}
+                                            <span className="font-medium">
+                                                Motivo:
+                                            </span>{' '}
+                                            {orden.clc_motivo_cancelacion}
+                                        </p>
+                                    </div>
+                                )}
+                                {orden.cancelada_at && (
+                                    <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-900">
+                                        <p className="flex items-center gap-2 font-semibold">
+                                            <XCircle className="h-4 w-4" />{' '}
+                                            Orden de compra cancelada
+                                        </p>
+                                        <p className="mt-1">
+                                            Por{' '}
+                                            {orden.cancelada_por?.name ?? '—'}{' '}
+                                            el {fechaLocal(orden.cancelada_at)}.{' '}
+                                            <span className="font-medium">
+                                                Motivo:
+                                            </span>{' '}
+                                            {orden.motivo_cancelacion}
+                                        </p>
+                                    </div>
+                                )}
+                                {!requisicion.cancelada_at &&
+                                    (orden.clc_cancelada_at ||
+                                        orden.cancelada_at) && (
+                                        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                                            <strong>
+                                                Cancelación pendiente:
+                                            </strong>{' '}
+                                            {orden.cancelada_at
+                                                ? 'falta cancelar la requisición. Al cancelarla, el presupuesto regresa al disponible del mes vigente.'
+                                                : 'falta cancelar la orden de compra y después la requisición.'}
+                                        </p>
+                                    )}
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <span className="font-semibold">
@@ -792,12 +922,34 @@ export default function Show({
                                                 ({orden.proveedor.rfc})
                                             </span>
                                         )}
+                                        {proveedores.length > 0 &&
+                                            !orden.xml_uuid &&
+                                            !orden.cancelada_at && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setErrorProveedorOrden(
+                                                            null,
+                                                        );
+                                                        setNuevoProveedorOrden(
+                                                            String(
+                                                                orden.proveedor_id,
+                                                            ),
+                                                        );
+                                                    }}
+                                                    className="ml-1 inline-flex items-center gap-1 rounded px-1 text-xs text-primary hover:underline"
+                                                    title="Reasignar el proveedor (solo mientras no tenga factura)"
+                                                >
+                                                    <Pencil className="h-3 w-3" />{' '}
+                                                    Cambiar
+                                                </button>
+                                            )}
                                     </div>
                                     <div>
                                         <span className="font-semibold">
                                             Fecha:
                                         </span>{' '}
-                                        {String(orden.fecha).slice(0, 10)}{' '}
+                                        {fecha(orden.fecha)}{' '}
                                         {puedeCambiarFechaOrden && (
                                             <button
                                                 type="button"
@@ -860,7 +1012,7 @@ export default function Show({
                                             <>
                                                 {orden.clc_folio_completo}{' '}
                                                 <span className="text-muted-foreground">
-                                                    ({orden.clc_fecha})
+                                                    ({fecha(orden.clc_fecha)})
                                                 </span>{' '}
                                                 {orden.clc_estado && (
                                                     <Badge variant="secondary">
@@ -880,15 +1032,22 @@ export default function Show({
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                    <Button variant="outline" size="sm" asChild>
-                                        <a
-                                            href={`/ordenes-compra/${orden.id}/pdf`}
-                                            target="_blank"
+                                    {/* Cancelada ya no se imprime. */}
+                                    {!orden.cancelada_at && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            asChild
                                         >
-                                            <FileText className="mr-1 h-4 w-4" />{' '}
-                                            Imprimir orden de compra
-                                        </a>
-                                    </Button>
+                                            <a
+                                                href={`/ordenes-compra/${orden.id}/pdf`}
+                                                target="_blank"
+                                            >
+                                                <FileText className="mr-1 h-4 w-4" />{' '}
+                                                Imprimir orden de compra
+                                            </a>
+                                        </Button>
+                                    )}
                                     {orden.xml_uuid && (
                                         <Button
                                             variant="outline"
@@ -919,6 +1078,7 @@ export default function Show({
                                     )}
                                     {orden.xml_uuid &&
                                         !orden.clc_folio_completo &&
+                                        !orden.cancelada_at &&
                                         puede('requisiciones-clc') && (
                                             <Button
                                                 size="sm"
@@ -961,6 +1121,31 @@ export default function Show({
                                             </span>{' '}
                                             {money(orden.xml_total)}
                                         </div>
+                                        {Number(orden.xml_isr) > 0 && (
+                                            <div className="col-span-2 rounded-md bg-muted/50 p-2">
+                                                <span className="font-semibold">
+                                                    ISR retenido:
+                                                </span>{' '}
+                                                {money(orden.xml_isr)} ·{' '}
+                                                <span className="font-semibold">
+                                                    Importe:
+                                                </span>{' '}
+                                                {money(orden.importe)} ·{' '}
+                                                <span className="font-semibold">
+                                                    A pagar al proveedor:
+                                                </span>{' '}
+                                                {money(
+                                                    Number(orden.importe) -
+                                                        Number(orden.xml_isr),
+                                                )}
+                                                <span className="block text-xs text-muted-foreground">
+                                                    La retención no cambia el
+                                                    importe del gasto; al
+                                                    proveedor se le paga el
+                                                    importe menos el ISR.
+                                                </span>
+                                            </div>
+                                        )}
                                         <div className="col-span-2">
                                             <EstadoSat
                                                 orden={orden}
@@ -978,7 +1163,7 @@ export default function Show({
                                             <span className="font-semibold">
                                                 Fecha de pago:
                                             </span>{' '}
-                                            {orden.pago_fecha}
+                                            {fecha(orden.pago_fecha)}
                                         </div>
                                         <div>
                                             <span className="font-semibold">
@@ -1174,6 +1359,7 @@ export default function Show({
                                     )}
 
                                 {!orden.xml_uuid &&
+                                    !orden.cancelada_at &&
                                     puede('ordenes-compra-create') && (
                                         <form
                                             onSubmit={cargarXml}
@@ -1257,48 +1443,80 @@ export default function Show({
 
                     {bitacoras.length > 0 && (
                         <Card>
-                            <CardHeader>
-                                <CardTitle>
-                                    Bitácora de Cambios ({bitacoras.length})
-                                </CardTitle>
+                            <CardHeader className="p-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setVerBitacora((v) => !v)}
+                                    aria-expanded={verBitacora}
+                                    className="flex w-full items-center gap-3 rounded-xl px-6 py-4 text-left hover:bg-muted/40"
+                                >
+                                    <ChevronDown
+                                        className={`h-4 w-4 shrink-0 transition-transform ${verBitacora ? '' : '-rotate-90'}`}
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                        <CardTitle>
+                                            Bitácora de Cambios (
+                                            {bitacoras.length})
+                                        </CardTitle>
+                                        {!verBitacora && (
+                                            <span className="mt-1 block truncate text-xs text-muted-foreground">
+                                                Último:{' '}
+                                                {bitacoras[bitacoras.length - 1]
+                                                    ?.observaciones ?? '—'}
+                                            </span>
+                                        )}
+                                    </span>
+                                    <span className="shrink-0 text-xs text-muted-foreground">
+                                        {verBitacora ? 'Ocultar' : 'Ver todo'}
+                                    </span>
+                                </button>
                             </CardHeader>
-                            <CardContent>
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b bg-muted/50 text-left">
-                                                <th className="p-2">#</th>
-                                                <th className="p-2">Fecha</th>
-                                                <th className="p-2">
-                                                    Observaciones
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {bitacoras.map(
-                                                (b: any, i: number) => (
-                                                    <tr
-                                                        key={
-                                                            b.id_tb_egreso_requisicion_bitacora
-                                                        }
-                                                        className="border-b hover:bg-muted/20"
-                                                    >
-                                                        <td className="p-2 text-muted-foreground">
-                                                            {i + 1}
-                                                        </td>
-                                                        <td className="p-2 text-xs text-muted-foreground">
-                                                            {b.registro ?? '—'}
-                                                        </td>
-                                                        <td className="p-2 text-xs">
-                                                            {b.observaciones}
-                                                        </td>
-                                                    </tr>
-                                                ),
-                                            )}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </CardContent>
+                            {verBitacora && (
+                                <CardContent>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm">
+                                            <thead>
+                                                <tr className="border-b bg-muted/50 text-left">
+                                                    <th className="p-2">#</th>
+                                                    <th className="p-2">
+                                                        Fecha
+                                                    </th>
+                                                    <th className="p-2">
+                                                        Observaciones
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {bitacoras.map(
+                                                    (b: any, i: number) => (
+                                                        <tr
+                                                            key={
+                                                                b.id_tb_egreso_requisicion_bitacora
+                                                            }
+                                                            className="border-b hover:bg-muted/20"
+                                                        >
+                                                            <td className="p-2 text-muted-foreground">
+                                                                {i + 1}
+                                                            </td>
+                                                            <td className="p-2 text-xs text-muted-foreground">
+                                                                {fecha(
+                                                                    b.registro,
+                                                                    true,
+                                                                )}
+                                                            </td>
+                                                            <td className="p-2 text-xs">
+                                                                {
+                                                                    b.observaciones
+                                                                }
+                                                            </td>
+                                                        </tr>
+                                                    ),
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </CardContent>
+                            )}
                         </Card>
                     )}
 
@@ -1306,6 +1524,26 @@ export default function Show({
                         <Button variant="outline" asChild>
                             <Link href="/requisiciones">Volver</Link>
                         </Button>
+                        {puedeCancelarClc && (
+                            <Button
+                                variant="outline"
+                                className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                onClick={() => setAccion('cancelar_clc')}
+                            >
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Cancelar CLC
+                            </Button>
+                        )}
+                        {puedeCancelarOrden && (
+                            <Button
+                                variant="outline"
+                                className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                onClick={() => setAccion('cancelar_orden')}
+                            >
+                                <XCircle className="mr-2 h-4 w-4" />
+                                Cancelar orden de compra
+                            </Button>
+                        )}
                         {puedeCancelar && (
                             <Button
                                 variant="outline"
@@ -1468,7 +1706,9 @@ export default function Show({
                     }
                     motivo={config.motivo}
                     textoConfirmar={config.textoConfirmar}
-                    textoCerrar={accion === 'cancelar' ? 'Regresar' : undefined}
+                    textoCerrar={
+                        accion?.startsWith('cancelar') ? 'Regresar' : undefined
+                    }
                     onConfirmar={config.ejecutar}
                 />
             )}
@@ -1518,6 +1758,57 @@ export default function Show({
                 </DialogContent>
             </Dialog>
 
+            <Dialog
+                open={nuevoProveedorOrden !== null}
+                onOpenChange={(abierto) =>
+                    !abierto && setNuevoProveedorOrden(null)
+                }
+            >
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Cambiar proveedor de {orden?.folio_completo}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Se puede reasignar mientras la orden no tenga su
+                            factura (XML). Queda en la bitácora de la
+                            requisición.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <SearchableSelect
+                        value={nuevoProveedorOrden ?? ''}
+                        onChange={(v) => setNuevoProveedorOrden(v)}
+                        options={opcionesProveedor}
+                        showValue={false}
+                        panelWidth={420}
+                        inline
+                    />
+                    {errorProveedorOrden && (
+                        <p className="text-sm text-red-600">
+                            {errorProveedorOrden}
+                        </p>
+                    )}
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setNuevoProveedorOrden(null)}
+                        >
+                            Regresar
+                        </Button>
+                        <Button
+                            disabled={
+                                !nuevoProveedorOrden ||
+                                nuevoProveedorOrden ===
+                                    String(orden?.proveedor_id)
+                            }
+                            onClick={guardarProveedorOrden}
+                        >
+                            Guardar proveedor
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             <Dialog open={showOrden} onOpenChange={setShowOrden}>
                 <DialogContent>
                     <form onSubmit={generarOrden} className="space-y-4">
@@ -1539,12 +1830,7 @@ export default function Show({
                                 onChange={(v) =>
                                     ordenForm.setData('proveedor_id', v)
                                 }
-                                options={proveedores.map((p) => ({
-                                    value: String(p.id),
-                                    label: p.rfc
-                                        ? `${p.nombre} (${p.rfc})`
-                                        : p.nombre,
-                                }))}
+                                options={opcionesProveedor}
                                 showValue={false}
                                 panelWidth={420}
                                 inline

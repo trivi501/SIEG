@@ -74,8 +74,20 @@
                     'importe' => $ds->sum(fn ($x) => (float) ($x->total ?? $x->sub_total)),
                 ];
             })->values();
-        $isr = 0.0;
         $totalImporte = $renglones->sum('importe') ?: (float) $orden->importe;
+
+        // ISR retenido en la factura (del XML): no cambia el importe; se le paga al proveedor Importe − ISR.
+        // Con varias partidas se reparte en proporción a su importe (el último renglón lleva el redondeo).
+        $isr = (float) ($orden->xml_isr ?? 0);
+        $repartido = 0.0;
+        $renglones = $renglones->map(function ($r, $i) use ($isr, $totalImporte, $renglones, &$repartido) {
+            $r['isr'] = $i === $renglones->count() - 1
+                ? round($isr - $repartido, 2)
+                : round($totalImporte > 0 ? $isr * $r['importe'] / $totalImporte : 0, 2);
+            $repartido += $r['isr'];
+
+            return $r;
+        });
 
         // Firmas: Solicita = titular de la secretaría; Autoriza = Tesorería (rol "autoriza" de la CLC) y
         // Sindicatura (rol "visto bueno").
@@ -103,7 +115,12 @@
             <td style="width: 118px;"><img class="logo" src="{{ public_path('img/logo_guindo.png') }}" alt="Ayuntamiento de Guadalupe"></td>
             <td style="width: 12px;"><div class="separador"></div></td>
             <td class="titulo">Cuenta por liquidar certificada para el<br>registro del ejercicio presupuestario</td>
-            <td class="folio" style="width: 140px; vertical-align: bottom;">{{ $orden->clc_folio_completo }}</td>
+            <td class="folio" style="width: 140px; vertical-align: bottom;">
+                @if($orden->clc_cancelada_at)
+                    <div style="color: #b91c1c; font-weight: bold; font-size: 11pt;">CANCELADA</div>
+                @endif
+                {{ $orden->clc_folio_completo }}
+            </td>
         </tr>
     </table>
 
@@ -182,7 +199,7 @@
                     <td class="num">{{ $n($r['subtotal']) }}</td>
                     <td class="num">0.00</td>
                     <td class="num">{{ $n($r['iva']) }}</td>
-                    <td class="num">{{ $n(0) }}</td>
+                    <td class="num">{{ $n($r['isr']) }}</td>
                     <td class="num">{{ $n($r['importe']) }}</td>
                 </tr>
             @endforeach

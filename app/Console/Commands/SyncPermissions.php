@@ -43,9 +43,11 @@ class SyncPermissions extends Command
             // Órdenes de compra (Recursos Materiales)
             'ordenes-compra-create', 'ordenes-compra-pagar', 'ordenes-compra-fecha',
             'ordenes-compra-verificar-sat', // vuelve a consultar en el SAT si la factura sigue vigente
+            'ordenes-compra-cancelar', // cancela la orden de compra (antes, su CLC); después sigue la requisición
 
             // Trámite de CLC: ver la bandeja y actuar como cada área (el pago es ordenes-compra-pagar).
             'clc-index', 'clc-recursos-materiales', 'clc-control-presupuestal', 'clc-sindicatura', 'clc-egresos',
+            'clc-cancelar', // cancela la CLC en cualquier paso, aun pagada (primer paso de la cancelación escalonada)
 
             // Modificaciones presupuestales
             'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar',

@@ -42,13 +42,13 @@ class UsuariosPruebaClc extends Command
         ]],
         'Recursos Materiales' => ['recursos.materiales', [
             'requisiciones-index', 'requisiciones-edit', 'requisiciones-cotizar', 'requisiciones-suficiencia', 'requisiciones-fecha', 'requisiciones-cancelar',
-            'recursos-materiales-index', 'ordenes-compra-create', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'proveedores-index', 'proveedores-create', 'proveedores-edit',
+            'recursos-materiales-index', 'ordenes-compra-create', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'ordenes-compra-cancelar', 'proveedores-index', 'proveedores-create', 'proveedores-edit',
             'clc-index', 'clc-recursos-materiales',
         ]],
         'Control Presupuestal' => ['control.presupuestal', [
             // Requisiciones de todas las áreas (la cotización y la bandeja son de Recursos Materiales).
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-delete', 'requisiciones-suficiencia',
-            'requisiciones-clc', 'requisiciones-extemporaneas', 'requisiciones-fecha', 'requisiciones-cancelar', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat',
+            'requisiciones-clc', 'requisiciones-extemporaneas', 'requisiciones-fecha', 'requisiciones-cancelar', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'ordenes-compra-cancelar', 'clc-cancelar',
             'presupuesto-index', 'gasto-index', 'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar', 'auditoria-index',
             'clc-index', 'clc-control-presupuestal',
             // Administra usuarios, roles y permisos.

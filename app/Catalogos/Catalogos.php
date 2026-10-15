@@ -278,6 +278,8 @@ final class Catalogos
                         ->ayuda('Si se deja vacío, se toma de los 3 primeros dígitos de la CLABE.'),
                     Campo::texto('clabe', 'CLABE')->max(18)->unico()->regex('/^\d{18}$/', 'La CLABE debe tener 18 dígitos.'),
                     Campo::texto('cuenta_bancaria', 'Número de cuenta')->max(20)->regex('/^\d+$/', 'El número de cuenta solo lleva dígitos.'),
+                    Campo::fecha('vigencia', 'Vigencia')
+                        ->ayuda('Hasta qué fecha está vigente en el padrón de proveedores. Vencida, no se le asigna orden de compra. Vacía, no vence.'),
                     Campo::activo(),
                 ],
                 buscar: ['nombre', 'rfc', 'clabe', 'cuenta_bancaria'],

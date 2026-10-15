@@ -46,6 +46,8 @@ final class TramiteClc
         'enviada_egresos' => ['Enviada a Egresos', 'egresos'],
         'recibida_egresos' => ['En Egresos', 'egresos'],
         'pagada' => ['Pagada', 'egresos'],
+        // Fuera del trámite: no entra en ninguna bandeja. Sigue cancelar la orden de compra y la requisición.
+        'cancelada' => ['Cancelada', 'control_presupuestal'],
     ];
 
     /**
@@ -79,6 +81,23 @@ final class TramiteClc
     {
         $orden->update(['clc_estado' => 'generada', 'clc_relacion_id' => null]);
         $this->movimiento($orden, 'generar', null, 'generada', null, null, $user);
+    }
+
+    /**
+     * Cancela la CLC en el paso en que esté (también pagada: el pago queda anulado y deja de contar como
+     * pagado). Se conservan folio, pago y número de transferencia como historial.
+     */
+    public function cancelar(OrdenCompra $orden, User $user, string $motivo): void
+    {
+        $anterior = $orden->clc_estado;
+        $orden->update([
+            'clc_estado' => 'cancelada',
+            'clc_relacion_id' => null,
+            'clc_cancelada_at' => now(),
+            'clc_cancelada_user_id' => $user->id,
+            'clc_motivo_cancelacion' => $motivo,
+        ]);
+        $this->movimiento($orden, 'cancelar', $anterior, 'cancelada', null, $motivo, $user);
     }
 
     /** Admin y Control Presupuestal ven todas las bandejas y el seguimiento de todas las CLC. */
@@ -293,9 +312,10 @@ final class TramiteClc
             'id_cat_egreso_requisicion_estado_anterior' => $anterior,
             'id_cat_egreso_requisicion_estado_nuevo' => EgresoRequisicion::PAGADA,
             'id_tb_usuarios' => 1,
-            'observaciones' => sprintf('Pago de la orden %s (CLC %s) registrado por %s: %s %s del %s por $%s.',
+            'observaciones' => sprintf('Pago de la orden %s (CLC %s) registrado por %s: %s %s del %s por $%s%s.',
                 $orden->folio_completo, $orden->clc_folio_completo, $user->name, OrdenCompra::FORMAS_PAGO[$orden->pago_forma],
-                trim($orden->transferencia_numero.' '.$orden->pago_referencia), $orden->pago_fecha->toDateString(), number_format($orden->importe, 2)),
+                trim($orden->transferencia_numero.' '.$orden->pago_referencia), $orden->pago_fecha->format('d/m/Y'), number_format($orden->netoAPagar(), 2),
+                $orden->xml_isr > 0 ? sprintf(' (importe $%s menos ISR retenido $%s)', number_format($orden->importe, 2), number_format($orden->xml_isr, 2)) : ''),
         ]);
     }
 

@@ -105,9 +105,10 @@ class EstadoCfdiSat
     }
 
     /**
-     * RFC del receptor y sello del CFDI (la expresión del SAT lleva los últimos 8 caracteres del sello).
+     * RFC del receptor, sello (la expresión del SAT lleva sus últimos 8 caracteres) e ISR retenido del CFDI:
+     * suma de las retenciones del comprobante con Impuesto 001 (ISR).
      *
-     * @return array{rfc_receptor: string|null, sello: string|null}
+     * @return array{rfc_receptor: string|null, sello: string|null, isr: float}
      */
     public static function datosDelXml(string $contenido): array
     {
@@ -116,16 +117,25 @@ class EstadoCfdiSat
         $ok = $dom->loadXML($contenido, LIBXML_NONET);
         libxml_use_internal_errors($previo);
         if (! $ok) {
-            return ['rfc_receptor' => null, 'sello' => null];
+            return ['rfc_receptor' => null, 'sello' => null, 'isr' => 0.0];
         }
 
         $xpath = new DOMXPath($dom);
         $comprobante = $xpath->query('/*[local-name()="Comprobante"]')->item(0);
         $receptor = $xpath->query('/*[local-name()="Comprobante"]/*[local-name()="Receptor"]')->item(0);
 
+        // Solo las del comprobante (las de cada concepto son el desglose de las mismas).
+        $isr = 0.0;
+        foreach ($xpath->query('/*[local-name()="Comprobante"]/*[local-name()="Impuestos"]/*[local-name()="Retenciones"]/*[local-name()="Retencion"]') as $retencion) {
+            if ($retencion->getAttribute('Impuesto') === '001') {
+                $isr += (float) $retencion->getAttribute('Importe');
+            }
+        }
+
         return [
             'rfc_receptor' => $receptor?->getAttribute('Rfc') ?: null,
             'sello' => $comprobante?->getAttribute('Sello') ?: null,
+            'isr' => round($isr, 2),
         ];
     }
 

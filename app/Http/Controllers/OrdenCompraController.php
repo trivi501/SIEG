@@ -38,8 +38,8 @@ class OrdenCompraController extends Controller
         ]);
 
         $proveedor = Proveedor::findOrFail($validated['proveedor_id']);
-        if (! $proveedor->activo) {
-            throw ValidationException::withMessages(['proveedor_id' => 'El proveedor está desactivado.']);
+        if ($impedimento = $proveedor->impedimentoParaOrden()) {
+            throw ValidationException::withMessages(['proveedor_id' => $impedimento]);
         }
 
         DB::transaction(function () use ($requisicion, $validated, $proveedor) {
@@ -65,11 +65,48 @@ class OrdenCompraController extends Controller
     }
 
     /**
+     * Reasigna el proveedor de la orden de compra mientras no tenga factura cargada (la factura la emite el
+     * proveedor de la orden). Queda en la bitácora de la requisición.
+     */
+    public function cambiarProveedor(Request $request, OrdenCompra $ordenCompra)
+    {
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'La orden de compra está cancelada.');
+        }
+        if ($ordenCompra->xml_uuid) {
+            return back()->with('error', 'El proveedor ya no se cambia: la orden de compra tiene su factura cargada.');
+        }
+
+        $validated = $request->validate(['proveedor_id' => ['required', 'integer', 'exists:proveedores,id']]);
+        $nuevo = Proveedor::findOrFail($validated['proveedor_id']);
+        if ($nuevo->id === $ordenCompra->proveedor_id) {
+            return back();
+        }
+        if ($impedimento = $nuevo->impedimentoParaOrden()) {
+            throw ValidationException::withMessages(['proveedor_id' => $impedimento]);
+        }
+
+        $anterior = $ordenCompra->proveedor;
+        DB::transaction(function () use ($ordenCompra, $nuevo, $anterior) {
+            $ordenCompra->update(['proveedor_id' => $nuevo->id]);
+            $requisicion = $ordenCompra->requisicion;
+            $this->bitacora($requisicion, $requisicion->id_cat_egreso_requisicion_estado,
+                "Proveedor de la orden {$ordenCompra->folio_completo} cambiado de ".($anterior?->nombre ?? '—')." a {$nuevo->nombre} por ".auth()->user()->name.'.');
+        });
+
+        return back()->with('success', "Proveedor de la orden {$ordenCompra->folio_completo} cambiado a {$nuevo->nombre}.");
+    }
+
+    /**
      * Recursos Materiales y Control Presupuestal corrigen la fecha de la orden de compra: debe ser del
      * mismo año del folio, no futura y no posterior al pago registrado.
      */
     public function cambiarFecha(Request $request, OrdenCompra $ordenCompra)
     {
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'La orden de compra está cancelada.');
+        }
+
         $validated = $request->validate([
             'fecha' => ['required', 'date', 'before_or_equal:today', function ($attr, $valor, $fallo) use ($ordenCompra) {
                 if ((int) date('Y', strtotime($valor)) !== (int) $ordenCompra->año) {
@@ -98,6 +135,8 @@ class OrdenCompraController extends Controller
 
     public function pdf(OrdenCompra $ordenCompra)
     {
+        abort_if($ordenCompra->cancelada_at, 403, "La orden de compra {$ordenCompra->folio_completo} está cancelada: ya no se imprime.");
+
         $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');
 
         $pdf = Pdf::loadView('ordenes-compra.pdf', ['orden' => $ordenCompra])->setPaper('letter');
@@ -117,6 +156,9 @@ class OrdenCompraController extends Controller
      */
     public function cargarXml(Request $request, OrdenCompra $ordenCompra, EstadoCfdiSat $estadoSat)
     {
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'La orden de compra está cancelada.');
+        }
         if ($ordenCompra->xml_uuid) {
             return back()->with('error', 'Esta orden de compra ya tiene su factura cargada.');
         }
@@ -124,13 +166,21 @@ class OrdenCompraController extends Controller
         $request->validate(['xml' => 'required|file|max:2048']);
         $contenido = file_get_contents($request->file('xml')->getRealPath());
         $cfdi = $this->leerCfdi($contenido);
+        $xml = EstadoCfdiSat::datosDelXml($contenido);
+        $cfdi['isr'] = $xml['isr'];
 
         $ordenCompra->load('proveedor');
         $errores = [];
 
-        if (abs($cfdi['total'] - (float) $ordenCompra->importe) > self::TOLERANCIA) {
-            $errores[] = sprintf('El total de la factura ($%s) no coincide con lo cotizado en la orden de compra ($%s).',
-                number_format($cfdi['total'], 2), number_format($ordenCompra->importe, 2));
+        // El ISR retenido no cambia el importe del gasto: el Total del XML ya viene sin el ISR, así que lo
+        // cotizado se compara con Total + ISR (al proveedor se le paga el Total).
+        $importeFactura = round($cfdi['total'] + $cfdi['isr'], 2);
+        if (abs($importeFactura - (float) $ordenCompra->importe) > self::TOLERANCIA) {
+            $errores[] = $cfdi['isr'] > 0
+                ? sprintf('El importe de la factura ($%s = total $%s + ISR retenido $%s) no coincide con lo cotizado en la orden de compra ($%s).',
+                    number_format($importeFactura, 2), number_format($cfdi['total'], 2), number_format($cfdi['isr'], 2), number_format($ordenCompra->importe, 2))
+                : sprintf('El total de la factura ($%s) no coincide con lo cotizado en la orden de compra ($%s).',
+                    number_format($cfdi['total'], 2), number_format($ordenCompra->importe, 2));
         }
         if ($ordenCompra->proveedor->rfc && $cfdi['rfc_emisor'] && mb_strtoupper($cfdi['rfc_emisor']) !== $ordenCompra->proveedor->rfc) {
             $errores[] = "La factura la emite {$cfdi['rfc_emisor']}, pero el proveedor de la orden es {$ordenCompra->proveedor->rfc}.";
@@ -145,10 +195,13 @@ class OrdenCompraController extends Controller
             throw ValidationException::withMessages(['xml' => implode(' ', $errores)]);
         }
 
-        // Estado en el SAT: no se acepta una factura cancelada o que el SAT no tiene registrada.
-        $xml = EstadoCfdiSat::datosDelXml($contenido);
+        // Estado en el SAT: solo se acepta (y se guarda) una factura vigente. Cancelada, no encontrada o sin
+        // respuesta del SAT no se guarda.
         $sat = $estadoSat->consultar($cfdi['rfc_emisor'] ?? '', $xml['rfc_receptor'] ?? '', $cfdi['total'], $cfdi['uuid'], $xml['sello']);
-        if ($sat && ($error = EstadoCfdiSat::error($sat, $cfdi['uuid']))) {
+        if (! $sat) {
+            throw ValidationException::withMessages(['xml' => 'No se pudo verificar la factura en el SAT (el servicio no respondió), así que no se guardó. Intenta de nuevo en unos minutos.']);
+        }
+        if ($error = EstadoCfdiSat::error($sat, $cfdi['uuid'])) {
             throw ValidationException::withMessages(['xml' => $error]);
         }
 
@@ -165,13 +218,7 @@ class OrdenCompraController extends Controller
         }
         EstadoCfdiSat::guardar($ordenCompra, $sat);
 
-        $mensaje = 'Factura cargada: el gasto pasa de comprometido a devengado.';
-        if (! $sat) {
-            return back()->with('success', $mensaje)
-                ->with('warning', 'No se pudo verificar la factura en el SAT (el servicio no respondió). Verifícala más tarde con el botón "Verificar en el SAT".');
-        }
-
-        return back()->with('success', $mensaje.' Vigente en el SAT.')
+        return back()->with('success', 'Factura aceptada (vigente en el SAT): el gasto pasa de comprometido a devengado.')
             ->with('warning', $sat['efos'] ? self::avisoEfos($cfdi['rfc_emisor']) : null);
     }
 
@@ -258,6 +305,7 @@ class OrdenCompraController extends Controller
                 'xml_fecha' => $cfdi['fecha'],
                 'xml_subtotal' => $cfdi['subtotal'],
                 'xml_total' => $cfdi['total'],
+                'xml_isr' => $cfdi['isr'],
                 'xml_cargado_at' => now(),
                 'xml_user_id' => auth()->id(),
             ]);
@@ -296,8 +344,13 @@ class OrdenCompraController extends Controller
         if (! $ordenCompra->xml_uuid) {
             return back()->with('error', 'La CLC se genera cuando la orden de compra ya tiene su factura (XML).');
         }
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'La orden de compra está cancelada.');
+        }
         if ($ordenCompra->clc_folio_completo) {
-            return back()->with('error', "Esta orden de compra ya tiene la CLC {$ordenCompra->clc_folio_completo}.");
+            // También si se canceló: lo que sigue es cancelar la orden de compra y la requisición.
+            return back()->with('error', "Esta orden de compra ya tiene la CLC {$ordenCompra->clc_folio_completo}"
+                .($ordenCompra->clc_cancelada_at ? ' (cancelada); sigue cancelar la orden de compra.' : '.'));
         }
 
         DB::transaction(function () use ($ordenCompra, $requisicion) {
@@ -318,6 +371,64 @@ class OrdenCompraController extends Controller
         });
 
         return back()->with('success', "CLC {$ordenCompra->clc_folio_completo} generada.");
+    }
+
+    /**
+     * Cancelación escalonada, de lo último a lo primero: CLC → orden de compra → requisición. Cancelar la CLC
+     * (en cualquier paso, aun pagada) la saca del trámite; después sigue cancelar la orden de compra.
+     */
+    public function cancelarClc(Request $request, OrdenCompra $ordenCompra, TramiteClc $tramite)
+    {
+        if (! $ordenCompra->clcActiva()) {
+            return back()->with('error', 'Esta orden de compra no tiene una CLC vigente.');
+        }
+        $motivo = $this->motivo($request);
+        $user = $request->user();
+        $pagada = $ordenCompra->pago_fecha !== null;
+
+        DB::transaction(function () use ($ordenCompra, $tramite, $user, $motivo, $pagada) {
+            $tramite->cancelar($ordenCompra, $user, $motivo);
+
+            $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::CON_FACTURA,
+                "CLC {$ordenCompra->clc_folio_completo} cancelada por {$user->name}"
+                .($pagada ? ' (el pago'.($ordenCompra->transferencia_numero ? " {$ordenCompra->transferencia_numero}" : '').' queda anulado)' : '')
+                .". Motivo: {$motivo}. Sigue cancelar la orden de compra {$ordenCompra->folio_completo}.");
+        });
+
+        return back()->with('success', "CLC {$ordenCompra->clc_folio_completo} cancelada. Sigue cancelar la orden de compra.");
+    }
+
+    /** Cancela la orden de compra (con su factura); antes debe estar cancelada su CLC. Sigue la requisición. */
+    public function cancelar(Request $request, OrdenCompra $ordenCompra)
+    {
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'Esta orden de compra ya está cancelada.');
+        }
+        if ($ordenCompra->clcActiva()) {
+            return back()->with('error', "Primero cancela la CLC {$ordenCompra->clc_folio_completo}: se cancela de lo último a lo primero.");
+        }
+        $motivo = $this->motivo($request);
+        $user = $request->user();
+
+        DB::transaction(function () use ($ordenCompra, $user, $motivo) {
+            $ordenCompra->update(['cancelada_at' => now(), 'cancelada_user_id' => $user->id, 'motivo_cancelacion' => $motivo]);
+
+            $requisicion = $ordenCompra->requisicion;
+            $this->bitacora($requisicion, EgresoRequisicion::COMPROMETIDA,
+                "Orden de compra {$ordenCompra->folio_completo} cancelada por {$user->name}"
+                .($ordenCompra->xml_uuid ? " (con su factura {$ordenCompra->xml_uuid})" : '')
+                .". Motivo: {$motivo}. Sigue cancelar la requisición {$requisicion->folio_completo}.");
+        });
+
+        return back()->with('success', "Orden de compra {$ordenCompra->folio_completo} cancelada. Sigue cancelar la requisición.");
+    }
+
+    private function motivo(Request $request): string
+    {
+        return $request->validate(
+            ['motivo' => 'required|string|min:5|max:1000'],
+            ['motivo.required' => 'Indica el motivo de la cancelación.', 'motivo.min' => 'El motivo debe tener al menos 5 caracteres.'],
+        )['motivo'];
     }
 
     public function clcPdf(OrdenCompra $ordenCompra)

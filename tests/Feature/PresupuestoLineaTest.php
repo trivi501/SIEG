@@ -486,21 +486,26 @@ class PresupuestoLineaTest extends TestCase
         // La expresión que se manda al SAT lleva emisor, receptor, total, UUID y los últimos 8 del sello.
         Http::assertSent(fn ($r) => str_contains($r->body(), 'id=E788CBF2-688D-473B-BCC1-340042ECC3A8&amp;re=VARD870519SR4&amp;rr=MGU6501015R2&amp;tt=4524.0&amp;fe=12345678'));
 
-        // Si el SAT no responde, se deja cargar y se avisa.
+        // Si el SAT no responde, tampoco se acepta: solo se guardan las facturas vigentes.
         $this->estadoSat = null;
-        $subir()->assertSessionHasNoErrors()->assertSessionHas('warning');
-        $orden->refresh();
-        $this->assertSame('E788CBF2-688D-473B-BCC1-340042ECC3A8', $orden->xml_uuid);
-        $this->assertNull($orden->sat_estado);
+        $subir()->assertSessionHasErrors('xml');
+        $this->assertStringContainsString('no se guardó', session('errors')->first('xml'));
+        $this->assertNull($orden->fresh()->xml_uuid);
+        Storage::disk('local')->assertDirectoryEmpty('/');
 
-        // Verificar después: vigente, con emisor en la lista de EFOS (aviso).
+        // Vigente: se acepta y se guarda; con el emisor en la lista de EFOS, además avisa.
         $this->estadoSat = 'Vigente';
         $this->efosSat = true;
-        $this->post("/ordenes-compra/{$orden->id}/verificar-sat")->assertSessionHas('success')->assertSessionHas('warning');
+        $subir()->assertSessionHasNoErrors()->assertSessionHas('success')->assertSessionHas('warning');
         $orden->refresh();
+        $this->assertSame('E788CBF2-688D-473B-BCC1-340042ECC3A8', $orden->xml_uuid);
         $this->assertSame('Vigente', $orden->sat_estado);
         $this->assertTrue($orden->sat_efos);
         $this->assertNotNull($orden->sat_verificado_at);
+        $this->assertCount(1, Storage::disk('local')->allFiles());
+
+        // Verificar después con el botón.
+        $this->post("/ordenes-compra/{$orden->id}/verificar-sat")->assertSessionHas('success')->assertSessionHas('warning');
 
         // El proveedor la cancela; al pagar se vuelve a consultar y se detiene.
         $this->efosSat = false;
@@ -523,6 +528,62 @@ class PresupuestoLineaTest extends TestCase
         $sinPermiso = User::factory()->create();
         $sinPermiso->givePermissionTo('requisiciones-index');
         $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/verificar-sat")->assertForbidden();
+    }
+
+    public function test_isr_retenido_del_xml_no_cambia_el_importe_y_se_paga_el_neto()
+    {
+        Storage::fake('local');
+        $this->crearTablasRequisicion();
+        $this->post('/presupuesto', $this->linea());
+        $proveedor = Proveedor::create(['nombre' => 'HONORARIOS', 'rfc' => 'VARD870519SR4', 'activo' => true]);
+        // Cotizado: 35,000 + IVA 5,600 = 40,600 (importe del gasto).
+        $this->requisicion(1, 40600);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-09-01', 'importe' => 40600,
+        ]);
+        // Factura con ISR retenido de 3,500: el Total del XML (37,100) ya viene sin el ISR.
+        $xml = UploadedFile::fake()->createWithContent('honorarios.xml', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Folio="10" Fecha="2026-09-01T08:00:00" SubTotal="35000.00" Total="37100.00" TipoDeComprobante="I">
+              <cfdi:Emisor Rfc="VARD870519SR4" Nombre="HONORARIOS" RegimenFiscal="612" />
+              <cfdi:Receptor Rfc="MGU6501015R2" Nombre="MUNICIPIO DE GUADALUPE ZAC" UsoCFDI="G03" />
+              <cfdi:Conceptos>
+                <cfdi:Concepto Importe="35000.00" Descripcion="SERVICIOS">
+                  <cfdi:Impuestos>
+                    <cfdi:Traslados><cfdi:Traslado Base="35000" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="5600.00" /></cfdi:Traslados>
+                    <cfdi:Retenciones><cfdi:Retencion Base="35000" Impuesto="001" TipoFactor="Tasa" TasaOCuota="0.100000" Importe="3500.00" /></cfdi:Retenciones>
+                  </cfdi:Impuestos>
+                </cfdi:Concepto>
+              </cfdi:Conceptos>
+              <cfdi:Impuestos TotalImpuestosRetenidos="3500.00" TotalImpuestosTrasladados="5600.00">
+                <cfdi:Retenciones><cfdi:Retencion Impuesto="001" Importe="3500.00" /></cfdi:Retenciones>
+                <cfdi:Traslados><cfdi:Traslado Base="35000" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="5600.00" /></cfdi:Traslados>
+              </cfdi:Impuestos>
+              <cfdi:Complemento>
+                <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="1.1" UUID="64546FB5-6ABB-4A97-8CED-F5F2438866EC" />
+              </cfdi:Complemento>
+            </cfdi:Comprobante>
+            XML);
+
+        // Total + ISR = lo cotizado: se acepta; el ISR se toma del XML (solo el del comprobante).
+        $this->post("/ordenes-compra/{$orden->id}/xml", ['xml' => $xml])->assertSessionHasNoErrors();
+        $orden->refresh();
+        $this->assertEquals([37100, 3500, 40600, 37100], [$orden->xml_total, $orden->xml_isr, $orden->importe, $orden->netoAPagar()]);
+
+        // El presupuesto ejerce el importe completo (la retención no lo cambia).
+        $this->assertEquals(40600, app(PresupuestoService::class)->linea('310|561|101001|2111')['devengado']);
+
+        // CLC: el ISR va en su columna y el total a pagar es importe − ISR.
+        $orden->update(['clc_folio' => 1, 'clc_año' => 2026, 'clc_folio_completo' => 'CLC-2026-0001', 'clc_fecha' => '2026-09-02', 'clc_estado' => 'recibida_egresos']);
+        $html = view('ordenes-compra.clc', ['orden' => $orden->fresh()->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa')])->render();
+        $this->assertStringContainsString('3,500.00', $html);
+        $this->assertStringContainsString('$37,100.00', $html);
+        $this->get('/clc')->assertInertia(fn ($p) => $p->where('clcs.0.isr', 3500)->where('clcs.0.neto', 37100));
+
+        // Al pagar, la bitácora dice el neto.
+        $this->post('/clc/accion', ['accion' => 'pagar', 'ordenes' => [$orden->id], 'pago_fecha' => '2026-09-05', 'pago_forma' => 'transferencia'])->assertSessionHasNoErrors();
+        $this->assertStringContainsString('por $37,100.00 (importe $40,600.00 menos ISR retenido $3,500.00)', DB::table('tb_egreso_requisicion_bitacora')->orderByDesc('id_tb_egreso_requisicion_bitacora')->value('observaciones'));
     }
 
     public function test_tramite_clc_por_area_y_recepcion_parcial()
@@ -678,9 +739,30 @@ class PresupuestoLineaTest extends TestCase
         // Formato único de requisición (FUR).
         $this->get('/requisiciones/1/pdf')->assertOk()->assertHeader('content-type', 'application/pdf');
 
+        // Proveedor con la vigencia vencida (al 14 de octubre, hora de México): no se le asigna la orden.
+        $this->travelTo(Carbon::parse('2026-10-15 18:00:00', 'UTC'));
+        $vencido = Proveedor::create(['nombre' => 'VENCIDO', 'activo' => true, 'vigencia' => '2026-10-14']);
+        $this->post('/requisiciones/1/orden-compra', ['proveedor_id' => $vencido->id, 'fecha' => '2026-10-01'])->assertSessionHasErrors('proveedor_id');
+        $this->assertStringContainsString('venció el 14/10/2026', session('errors')->first('proveedor_id'));
+        $proveedor->update(['vigencia' => '2026-10-15']); // vigente hasta hoy inclusive
+
         $this->post('/requisiciones/1/orden-compra', $orden)->assertSessionHas('success');
         $this->assertSame(EgresoRequisicion::CON_ORDEN_COMPRA, $estado());
         $this->assertSame(1, OrdenCompra::count());
+        $oc = OrdenCompra::firstOrFail();
+
+        // Sin factura se reasigna el proveedor (con vigencia) y queda en la bitácora.
+        $this->get('/requisiciones/1')->assertInertia(fn ($p) => $p->where('proveedores', fn ($lista) => collect($lista)->firstWhere('id', $vencido->id)['vencido'] === true));
+        $otro = Proveedor::create(['nombre' => 'OTRO PROVEEDOR', 'activo' => true]);
+        $this->post("/ordenes-compra/{$oc->id}/proveedor", ['proveedor_id' => $vencido->id])->assertSessionHasErrors('proveedor_id');
+        $this->post("/ordenes-compra/{$oc->id}/proveedor", ['proveedor_id' => $otro->id])->assertSessionHas('success');
+        $this->assertSame($otro->id, $oc->fresh()->proveedor_id);
+        $this->assertStringContainsString('cambiado de PAPELERÍA a OTRO PROVEEDOR', DB::table('tb_egreso_requisicion_bitacora')->orderByDesc('id_tb_egreso_requisicion_bitacora')->value('observaciones'));
+
+        // Con la factura cargada ya no.
+        $oc->update(['xml_uuid' => 'UUID-1']);
+        $this->post("/ordenes-compra/{$oc->id}/proveedor", ['proveedor_id' => $proveedor->id])->assertSessionHas('error');
+        $this->assertSame($otro->id, $oc->fresh()->proveedor_id);
 
         // Recursos Materiales sigue viéndola en su lista.
         $this->get('/recursos-materiales')->assertOk()
@@ -838,6 +920,82 @@ class PresupuestoLineaTest extends TestCase
         $this->actingAs($enlace)->getJson('/requisiciones/gasto/detalle?clave='.urlencode($clave))->assertForbidden();
         $enlace->givePermissionTo('gasto-index');
         $this->getJson('/requisiciones/gasto/detalle?clave='.urlencode('999|561|101001|2111'))->assertForbidden();
+    }
+
+    public function test_cancelacion_escalonada_clc_orden_de_compra_y_requisicion()
+    {
+        $this->crearTablasRequisicion();
+        $this->travelTo(Carbon::parse('2026-10-15 18:00:00', 'UTC'));
+        $this->post('/presupuesto', $this->linea());
+        $clave = '310|561|101001|2111';
+
+        // Requisición de marzo por 300, con orden de compra, factura y CLC pagada.
+        $this->requisicion(1, 300, '2026-03-10 18:00:00');
+        DB::table('tb_egreso_requisicion')->update(['id_cat_egreso_requisicion_estado' => EgresoRequisicion::PAGADA]);
+        $proveedor = Proveedor::create(['nombre' => 'PAPELERÍA', 'activo' => true]);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-03-11', 'importe' => 300, 'xml_uuid' => 'UUID-1',
+            'clc_folio' => 1, 'clc_año' => 2026, 'clc_folio_completo' => 'CLC-2026-0001', 'clc_fecha' => '2026-03-12', 'clc_estado' => 'pagada',
+            'pago_fecha' => '2026-03-20', 'pago_forma' => 'transferencia', 'transferencia_folio' => 1, 'transferencia_año' => 2026, 'transferencia_numero' => 'TRF-2026-0001',
+        ]);
+        $linea = fn () => app(PresupuestoService::class)->linea($clave);
+        $situacion = fn (int $mes) => (new SaldosMensuales)->situacion(2026, $mes)[$clave];
+        $this->assertEquals(300, $linea()['pagado']);
+
+        // De lo último a lo primero: ni la requisición ni la orden de compra se cancelan con la CLC vigente.
+        $this->post('/requisiciones/1/cancelar', ['motivo' => 'Ya no se ocupa'])->assertForbidden();
+        $this->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'Ya no se ocupa'])->assertSessionHas('error');
+        $this->assertStringContainsString('Primero cancela la CLC CLC-2026-0001', session('error'));
+
+        // 1. La CLC (pagada): sale del trámite, el pago se anula y el importe vuelve a devengado.
+        $this->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => ''])->assertSessionHasErrors('motivo');
+        $this->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Se pagó dos veces'])->assertSessionHas('success');
+        $orden->refresh();
+        $this->assertSame('cancelada', $orden->clc_estado);
+        $this->assertSame('Se pagó dos veces', $orden->clc_motivo_cancelacion);
+        $this->assertSame('TRF-2026-0001', $orden->transferencia_numero); // queda como historial
+        $this->assertSame(EgresoRequisicion::CON_FACTURA, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+        $this->assertSame(['pagado' => 0.0, 'devengado' => 300.0], ['pagado' => (float) $linea()['pagado'], 'devengado' => (float) $linea()['devengado']]);
+        $this->assertSame('cancelar', ClcMovimiento::latest('id')->value('accion'));
+        $this->get('/clc')->assertOk()->assertInertia(fn ($p) => $p->where('clcs.0.estado', 'cancelada')->where('clcs.0.cancelacion', 'Se pagó dos veces'));
+
+        // No se genera otra CLC ni se vuelve a cancelar; la requisición todavía no.
+        $this->post("/ordenes-compra/{$orden->id}/clc")->assertSessionHas('error');
+        $this->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Otra vez'])->assertSessionHas('error');
+        $this->post('/requisiciones/1/cancelar', ['motivo' => 'Ya no se ocupa'])->assertForbidden();
+
+        // 2. La orden de compra: deja de devengar y la requisición regresa a comprometida.
+        $this->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'El proveedor no surtió'])->assertSessionHas('success');
+        $this->assertNotNull($orden->fresh()->cancelada_at);
+        $this->assertSame(EgresoRequisicion::COMPROMETIDA, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+        $this->assertEquals(0, $linea()['devengado']);
+        $this->assertEquals(300, $linea()['comprometido']);
+        $this->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'Otra vez'])->assertSessionHas('error');
+
+        // 3. La requisición: el presupuesto regresa en octubre (mes vigente), no en marzo.
+        $this->assertEquals(round(10 * 100.01 - 300, 2), $situacion(10)['disponible_mes']);
+        $this->post('/requisiciones/1/cancelar', ['motivo' => 'Ya no se ocupa'])->assertSessionHas('success');
+        $this->assertSame(EgresoRequisicion::CANCELADA, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+        $this->assertEquals(300, $situacion(3)['comprometido_mes']);
+        $this->assertEquals(-300, $situacion(10)['comprometido_mes']);
+        $this->assertEquals(round(10 * 100.01, 2), $situacion(10)['disponible_mes']);
+        $this->assertEquals(1200.12, $linea()['disponible']);
+
+        // Bitácora en orden y los PDF marcan la cancelación.
+        $bitacora = DB::table('tb_egreso_requisicion_bitacora')->orderBy('id_tb_egreso_requisicion_bitacora')->pluck('observaciones');
+        $this->assertStringContainsString('CLC CLC-2026-0001 cancelada', $bitacora[0]);
+        $this->assertStringContainsString('el pago TRF-2026-0001 queda anulado', $bitacora[0]);
+        $this->assertStringContainsString('Orden de compra OC-2026-0001 cancelada', $bitacora[1]);
+        $this->assertStringContainsString('Requisición cancelada', $bitacora[2]);
+        $this->get("/ordenes-compra/{$orden->id}/pdf")->assertForbidden(); // cancelada ya no se imprime
+        $this->get("/ordenes-compra/{$orden->id}/clc")->assertOk();
+
+        // Cada paso exige su permiso.
+        $sinPermiso = User::factory()->create();
+        $sinPermiso->givePermissionTo('requisiciones-index');
+        $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Prueba'])->assertForbidden();
+        $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'Prueba'])->assertForbidden();
     }
 
     public function test_calendario_de_captura_y_autorizacion_de_extemporaneas()
