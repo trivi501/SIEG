@@ -2,7 +2,6 @@ import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Plus, Eye, Pencil, Download, Search, Send, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import ConfirmarAccion from '@/components/confirmar-accion';
-import SuficienciaBadge from '@/components/suficiencia-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,16 +30,20 @@ interface Requisicion {
     id_cat_egreso_requisicion_estado: number;
     cat_egreso_requisicion_estado?: { descripcion: string } | null;
     cat_egreso_unidad_administrativa?: { clave: string; nombre: string } | null;
-    suficiencia?: boolean | null;
-    extemporanea?: boolean | null;
-    extemporanea_autorizada_at?: string | null;
-    orden_compra?: { folio_completo: string; xml_uuid: string | null } | null;
+    orden_compra?: {
+        folio_completo: string;
+        cancelada_at: string | null;
+        clc_folio_completo: string | null;
+        clc_estado: string | null;
+        clc_cancelada_at: string | null;
+    } | null;
 }
 
 export default function Index({
     requisiciones,
     estados,
     filters,
+    estadosClc,
 }: {
     requisiciones: { data: Requisicion[] };
     estados: {
@@ -48,6 +51,7 @@ export default function Index({
         descripcion: string;
     }[];
     filters: Record<string, string>;
+    estadosClc: Record<string, string>;
 }) {
     const permisos =
         (usePage().props.userPermissions as string[] | undefined) ?? [];
@@ -244,6 +248,12 @@ export default function Index({
                                             </select>
                                         </div>
                                     </TableHead>
+                                    <TableHead className="p-2 align-top">
+                                        Orden de compra
+                                    </TableHead>
+                                    <TableHead className="p-2 align-top">
+                                        CLC
+                                    </TableHead>
                                     <TableHead className="p-2">
                                         Concepto
                                         <div className="mt-1 flex gap-1">
@@ -304,7 +314,7 @@ export default function Index({
                                 {requisiciones.data.length === 0 && (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={7}
+                                            colSpan={9}
                                             className="text-center text-muted-foreground"
                                         >
                                             No hay requisiciones registradas.
@@ -356,46 +366,68 @@ export default function Index({
                                                         .cat_egreso_requisicion_estado
                                                         ?.descripcion ?? '—'}
                                                 </Badge>
-                                                <SuficienciaBadge
-                                                    suficiencia={
-                                                        req.suficiencia
-                                                    }
-                                                />
-                                                {!!req.extemporanea && (
-                                                    <Badge
-                                                        variant="secondary"
-                                                        className={
-                                                            req.extemporanea_autorizada_at
-                                                                ? 'bg-green-100 text-green-800'
-                                                                : 'bg-amber-100 text-amber-900'
-                                                        }
-                                                    >
-                                                        {req.extemporanea_autorizada_at
-                                                            ? 'Extemporánea autorizada'
-                                                            : 'Extemporánea por autorizar'}
-                                                    </Badge>
-                                                )}
-                                                {req.orden_compra && (
-                                                    <Badge
-                                                        variant="outline"
-                                                        title={
-                                                            req.orden_compra
-                                                                .xml_uuid
-                                                                ? 'Factura cargada'
-                                                                : 'Factura pendiente'
-                                                        }
-                                                    >
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-xs whitespace-nowrap">
+                                            {req.orden_compra ? (
+                                                <>
+                                                    <div className="font-medium">
                                                         {
                                                             req.orden_compra
                                                                 .folio_completo
                                                         }
-                                                        {req.orden_compra
-                                                            .xml_uuid
-                                                            ? ' · facturada'
-                                                            : ''}
-                                                    </Badge>
-                                                )}
-                                            </div>
+                                                    </div>
+                                                    {req.orden_compra
+                                                        .cancelada_at && (
+                                                        <div className="text-red-700">
+                                                            Cancelada
+                                                        </div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <span className="text-muted-foreground">
+                                                    —
+                                                </span>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="text-xs whitespace-nowrap">
+                                            {req.orden_compra
+                                                ?.clc_folio_completo ? (
+                                                <>
+                                                    <div className="font-medium">
+                                                        {
+                                                            req.orden_compra
+                                                                .clc_folio_completo
+                                                        }
+                                                    </div>
+                                                    <div
+                                                        className={
+                                                            req.orden_compra
+                                                                .clc_estado ===
+                                                            'cancelada'
+                                                                ? 'text-red-700'
+                                                                : req
+                                                                        .orden_compra
+                                                                        .clc_estado ===
+                                                                    'pagada'
+                                                                  ? 'text-green-700'
+                                                                  : 'text-muted-foreground'
+                                                        }
+                                                    >
+                                                        {estadosClc[
+                                                            req.orden_compra
+                                                                .clc_estado ??
+                                                                ''
+                                                        ] ??
+                                                            req.orden_compra
+                                                                .clc_estado}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <span className="text-muted-foreground">
+                                                    —
+                                                </span>
+                                            )}
                                         </TableCell>
                                         <TableCell className="max-w-xs truncate text-muted-foreground">
                                             {req.observaciones || '—'}

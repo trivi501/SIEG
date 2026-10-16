@@ -51,7 +51,8 @@ class EgresoRequisicionController extends Controller
         $user = auth()->user();
         $isAdmin = self::veTodas($user);
 
-        $query = EgresoRequisicion::with(['catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa:id_cat_egreso_unidad_administrativa,clave,nombre', 'ordenCompra:id,id_tb_egreso_requisicion,folio_completo,xml_uuid']);
+        $query = EgresoRequisicion::with(['catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa:id_cat_egreso_unidad_administrativa,clave,nombre',
+            'ordenCompra:id,id_tb_egreso_requisicion,folio_completo,cancelada_at,clc_folio_completo,clc_estado,clc_cancelada_at']);
 
         $unidades = $this->unidadesVisibles($user, $isAdmin);
         if ($unidades !== null) {
@@ -82,6 +83,7 @@ class EgresoRequisicionController extends Controller
             'estados' => EgresoRequisicionEstado::all(['id_cat_egreso_requisicion_estado', 'descripcion']),
             'filters' => $request->only(['folio', 'folio_completo', 'unidad', 'concepto', 'estado', 'año']),
             'isAdmin' => $isAdmin,
+            'estadosClc' => collect(TramiteClc::ESTADOS)->map(fn ($e) => $e[0]),
         ]);
     }
 
