@@ -275,9 +275,16 @@ class OrdenCompraController extends Controller
             $errores[] = "La factura {$cfdi['uuid']} ya está cargada en {$donde($mismoUuid)}.";
         }
 
+        // Una factura cancelada (con su orden de compra) se puede cargar una sola vez más.
+        $cancelada = OrdenCompra::where('xml_uuid_cancelado', $cfdi['uuid'])->orderBy('id')->get(['folio_completo']);
+        if ($cancelada->count() >= 2) {
+            $errores[] = "La factura {$cfdi['uuid']} ya se canceló con las órdenes {$cancelada->pluck('folio_completo')->implode(' y ')}: solo se puede volver a cargar una vez.";
+        }
+
         if ($cfdi['folio'] && $cfdi['rfc_emisor']) {
             $mismoFolio = OrdenCompra::with('requisicion:id_tb_egreso_requisicion,folio_completo')
                 ->whereKeyNot($ordenCompra->getKey())
+                ->whereNull('cancelada_at') // la de una orden cancelada ya no cuenta
                 ->when($mismoUuid, fn ($q) => $q->whereKeyNot($mismoUuid->getKey()))
                 ->whereRaw('UPPER(xml_rfc_emisor) = ?', [mb_strtoupper($cfdi['rfc_emisor'])])
                 ->where('xml_folio', $cfdi['folio'])
@@ -379,8 +386,8 @@ class OrdenCompraController extends Controller
      */
     public function cancelarClc(Request $request, OrdenCompra $ordenCompra, TramiteClc $tramite)
     {
-        if (! $ordenCompra->clcActiva()) {
-            return back()->with('error', 'Esta orden de compra no tiene una CLC vigente.');
+        if ($impedimento = TramiteClc::impedimentoParaCancelar($ordenCompra, $request->user())) {
+            return back()->with('error', $impedimento);
         }
         $motivo = $this->motivo($request);
         $user = $request->user();
@@ -411,12 +418,18 @@ class OrdenCompraController extends Controller
         $user = $request->user();
 
         DB::transaction(function () use ($ordenCompra, $user, $motivo) {
-            $ordenCompra->update(['cancelada_at' => now(), 'cancelada_user_id' => $user->id, 'motivo_cancelacion' => $motivo]);
+            // Con la orden se cancela su factura: el UUID pasa al historial y queda libre para cargarse
+            // una vez más en otra orden (ver duplicidades()).
+            $factura = $ordenCompra->xml_uuid;
+            $ordenCompra->update([
+                'cancelada_at' => now(), 'cancelada_user_id' => $user->id, 'motivo_cancelacion' => $motivo,
+                'xml_uuid' => null, 'xml_uuid_cancelado' => $factura,
+            ]);
 
             $requisicion = $ordenCompra->requisicion;
             $this->bitacora($requisicion, EgresoRequisicion::COMPROMETIDA,
                 "Orden de compra {$ordenCompra->folio_completo} cancelada por {$user->name}"
-                .($ordenCompra->xml_uuid ? " (con su factura {$ordenCompra->xml_uuid})" : '')
+                .($factura ? " con su factura {$factura} (se puede cargar una vez más en otra orden)" : '')
                 .". Motivo: {$motivo}. Sigue cancelar la requisición {$requisicion->folio_completo}.");
         });
 
@@ -434,6 +447,7 @@ class OrdenCompraController extends Controller
     public function clcPdf(OrdenCompra $ordenCompra)
     {
         abort_unless($ordenCompra->clc_folio_completo, 404);
+        abort_if($ordenCompra->clc_cancelada_at, 403, "La CLC {$ordenCompra->clc_folio_completo} está cancelada: ya no se imprime.");
         $this->autorizarArea($ordenCompra->requisicion);
 
         $ordenCompra->load('proveedor', 'requisicion.tbEgresoRequisicionDetalles', 'requisicion.catEgresoUnidadAdministrativa');

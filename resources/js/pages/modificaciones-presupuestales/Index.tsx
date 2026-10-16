@@ -441,6 +441,43 @@ export default function Index({
         aplicar(nuevos);
     };
 
+    const lineaModificacion = (
+        m: (typeof modificaciones.data)[number],
+        lado: 'origen' | 'destino',
+    ) => {
+        const descripcion =
+            lado === 'origen' ? m.origen_descripcion : m.destino_descripcion;
+
+        if (!descripcion) {
+            return <span className="text-muted-foreground">—</span>;
+        }
+
+        return (
+            <>
+                <div className="truncate" title={descripcion}>
+                    {lado === 'origen' ? (
+                        <span className="text-destructive">−</span>
+                    ) : (
+                        <span className="text-green-700">+</span>
+                    )}{' '}
+                    {descripcion}
+                    {periodo(lado === 'origen' ? m.origen_mes : m.destino_mes)}
+                </div>
+                {lado === 'origen'
+                    ? saldo(
+                          m.origen_disponible,
+                          m.origen_disponible_mes,
+                          m.origen_mes,
+                      )
+                    : saldo(
+                          m.destino_disponible,
+                          m.destino_disponible_mes,
+                          m.destino_mes,
+                      )}
+            </>
+        );
+    };
+
     return (
         <>
             <Head title="Modificaciones Presupuestales" />
@@ -514,7 +551,7 @@ export default function Index({
                                         </select>
                                     </TableHead>
                                     <TableHead className="p-2">
-                                        Origen → Destino
+                                        Origen (de dónde viene)
                                         <input
                                             value={f.partida}
                                             onChange={(e) =>
@@ -527,6 +564,9 @@ export default function Index({
                                             placeholder="Partida..."
                                             className="mt-1 block w-40 rounded border-input px-1 py-0.5 text-xs shadow-sm"
                                         />
+                                    </TableHead>
+                                    <TableHead className="p-2 align-top">
+                                        Destino (a dónde va)
                                     </TableHead>
                                     <TableHead className="text-right">
                                         Importe
@@ -579,7 +619,7 @@ export default function Index({
                                 {modificaciones.data.length === 0 && (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={7}
+                                            colSpan={8}
                                             className="text-center text-muted-foreground"
                                         >
                                             No hay modificaciones
@@ -601,45 +641,27 @@ export default function Index({
                                         <TableCell>
                                             {tipos[m.tipo] ?? m.tipo}
                                         </TableCell>
-                                        <TableCell className="max-w-md text-xs">
-                                            {m.origen_descripcion && (
-                                                <div
-                                                    className="truncate"
-                                                    title={m.origen_descripcion}
-                                                >
-                                                    <span className="text-destructive">
-                                                        −
-                                                    </span>{' '}
-                                                    {m.origen_descripcion}
-                                                    {periodo(m.origen_mes)}
-                                                </div>
+                                        {/* Origen: de dónde viene (traspaso y reducción). La ampliación tiene una sola partida y va aquí. */}
+                                        <TableCell className="max-w-xs text-xs">
+                                            {m.tipo === 'ampliacion'
+                                                ? lineaModificacion(
+                                                      m,
+                                                      'destino',
+                                                  )
+                                                : lineaModificacion(
+                                                      m,
+                                                      'origen',
+                                                  )}
+                                        </TableCell>
+                                        {/* Destino: a dónde va (solo traspaso). */}
+                                        <TableCell className="max-w-xs text-xs">
+                                            {m.tipo === 'traspaso' ? (
+                                                lineaModificacion(m, 'destino')
+                                            ) : (
+                                                <span className="text-muted-foreground">
+                                                    —
+                                                </span>
                                             )}
-                                            {m.origen_descripcion &&
-                                                saldo(
-                                                    m.origen_disponible,
-                                                    m.origen_disponible_mes,
-                                                    m.origen_mes,
-                                                )}
-                                            {m.destino_descripcion && (
-                                                <div
-                                                    className="truncate"
-                                                    title={
-                                                        m.destino_descripcion
-                                                    }
-                                                >
-                                                    <span className="text-green-700">
-                                                        +
-                                                    </span>{' '}
-                                                    {m.destino_descripcion}
-                                                    {periodo(m.destino_mes)}
-                                                </div>
-                                            )}
-                                            {m.destino_descripcion &&
-                                                saldo(
-                                                    m.destino_disponible,
-                                                    m.destino_disponible_mes,
-                                                    m.destino_mes,
-                                                )}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {money(m.importe)}

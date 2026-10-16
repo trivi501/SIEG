@@ -47,7 +47,7 @@ const saldos: {
     {
         key: 'comprometido',
         titulo: 'Comprometido',
-        ayuda: 'Con suficiencia, sin factura',
+        ayuda: 'Acumulado: todo lo comprometido (incluye devengado y pagado)',
     },
     {
         key: 'en_tramite',
@@ -57,7 +57,7 @@ const saldos: {
     {
         key: 'devengado',
         titulo: 'Devengado',
-        ayuda: 'Con factura (XML), sin pago',
+        ayuda: 'Acumulado: con factura (XML), incluye lo pagado',
     },
     { key: 'pagado', titulo: 'Pagado', ayuda: 'Con pago registrado' },
     {

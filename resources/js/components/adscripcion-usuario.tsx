@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import SearchableSelect from '@/components/searchable-select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -16,9 +17,6 @@ const TITULOS = [
     'PROFR.',
     'PROFRA.',
 ];
-
-const claseSelect =
-    'block w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus:border-ring focus:ring-ring';
 
 /**
  * Datos del usuario para los formatos: título, cargo y a quién pertenece — a una secretaría o
@@ -43,6 +41,14 @@ export default function AdscripcionUsuario({
     const [pertenece, setPertenece] = useState<'secretaria' | 'regidor'>(
         inicial.regidor_id ? 'regidor' : 'secretaria',
     );
+    // Selects con búsqueda (se escribe para filtrar; flechas y Enter para elegir). El valor viaja en un
+    // campo oculto con el mismo nombre que tenía el select.
+    const [unidad, setUnidad] = useState(
+        inicial.regidor_id
+            ? ''
+            : String(inicial.id_cat_egreso_unidad_administrativa ?? ''),
+    );
+    const [regidor, setRegidor] = useState(String(inicial.regidor_id ?? ''));
 
     return (
         <>
@@ -104,25 +110,22 @@ export default function AdscripcionUsuario({
 
                 {pertenece === 'secretaria' ? (
                     <>
-                        <select
-                            id="id_cat_egreso_unidad_administrativa"
+                        <input
+                            type="hidden"
                             name="id_cat_egreso_unidad_administrativa"
-                            defaultValue={
-                                inicial.regidor_id
-                                    ? ''
-                                    : (inicial.id_cat_egreso_unidad_administrativa ??
-                                      '')
-                            }
-                            className={claseSelect}
-                            aria-label="Secretaría o dirección"
-                        >
-                            <option value="">Sin asignar</option>
-                            {unidades.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                    {u.nombre}
-                                </option>
-                            ))}
-                        </select>
+                            value={unidad}
+                        />
+                        <SearchableSelect
+                            value={unidad}
+                            onChange={setUnidad}
+                            options={unidades.map((u) => ({
+                                value: String(u.id),
+                                label: u.nombre,
+                            }))}
+                            placeholder="Sin asignar (escribe para buscar…)"
+                            showValue={false}
+                            panelWidth={480}
+                        />
                         <p className="text-xs text-muted-foreground">
                             Solo verá las requisiciones y el presupuesto de esta
                             secretaría o dirección; firma por el área su
@@ -136,20 +139,22 @@ export default function AdscripcionUsuario({
                     </>
                 ) : (
                     <>
-                        <select
-                            id="regidor_id"
+                        <input
+                            type="hidden"
                             name="regidor_id"
-                            defaultValue={inicial.regidor_id ?? ''}
-                            className={claseSelect}
-                            aria-label="Regidor"
-                        >
-                            <option value="">Seleccionar…</option>
-                            {regidores.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                    {r.nombre}
-                                </option>
-                            ))}
-                        </select>
+                            value={regidor}
+                        />
+                        <SearchableSelect
+                            value={regidor}
+                            onChange={setRegidor}
+                            options={regidores.map((r) => ({
+                                value: String(r.id),
+                                label: r.nombre,
+                            }))}
+                            placeholder="Escribe para buscar el regidor…"
+                            showValue={false}
+                            panelWidth={420}
+                        />
                         <p className="text-xs text-muted-foreground">
                             Es enlace de este regidor: él firma sus
                             requisiciones y CLC. Para el presupuesto queda en

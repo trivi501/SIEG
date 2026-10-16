@@ -84,6 +84,50 @@ final class TramiteClc
     }
 
     /**
+     * Pasos en que cada área puede cancelar la CLC (con el permiso clc-cancelar): el área hasta que
+     * Recursos Materiales la recibe; Recursos Materiales hasta que la recibe Control Presupuestal; Control
+     * Presupuestal hasta que la recibe Sindicatura. Después, solo Admin.
+     */
+    public const CANCELA_HASTA = [
+        'area' => ['generada', 'enviada_rm'],
+        'recursos_materiales' => ['generada', 'enviada_rm', 'recibida_rm', 'devuelta', 'enviada_cp'],
+        'control_presupuestal' => ['generada', 'enviada_rm', 'recibida_rm', 'devuelta', 'enviada_cp', 'recibida_cp', 'enviada_sindicatura'],
+    ];
+
+    /** Por qué el usuario no puede cancelar la CLC en el paso en que está (null = sí puede). */
+    public static function impedimentoParaCancelar(OrdenCompra $orden, User $user): ?string
+    {
+        if (! $orden->clcActiva()) {
+            return 'Esta orden de compra no tiene una CLC vigente.';
+        }
+        if ($user->hasRole(['Super Admin', 'Admin'])) {
+            return null;
+        }
+        if (! $user->can('clc-cancelar')) {
+            return 'No tienes permiso para cancelar CLC.';
+        }
+
+        $paso = self::descripcion($orden->clc_estado);
+        [$area, $mensaje] = match (true) {
+            $user->can('clc-control-presupuestal') => ['control_presupuestal', "Ya llegó a Sindicatura ({$paso}): Control Presupuestal ya no puede cancelarla."],
+            $user->can('clc-recursos-materiales') => ['recursos_materiales', "Control Presupuestal ya la recibió ({$paso}): Recursos Materiales ya no puede cancelarla."],
+            $user->can('requisiciones-clc') => ['area', "Recursos Materiales ya la recibió ({$paso}): el área ya no puede cancelarla."],
+            default => [null, 'No participas en el trámite de esta CLC.'],
+        };
+        if ($area === null) {
+            return $mensaje;
+        }
+        if ($area === 'area') {
+            $unidad = (int) $user->id_cat_egreso_unidad_administrativa;
+            if (! $unidad || $unidad !== (int) $orden->requisicion?->id_cat_egreso_unidad_administrativa) {
+                return 'Esta CLC no es de tu área.';
+            }
+        }
+
+        return in_array($orden->clc_estado, self::CANCELA_HASTA[$area], true) ? null : $mensaje;
+    }
+
+    /**
      * Cancela la CLC en el paso en que esté (también pagada: el pago queda anulado y deja de contar como
      * pagado). Se conservan folio, pago y número de transferencia como historial.
      */

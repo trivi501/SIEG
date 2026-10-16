@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\AlmacenEntrada;
+use App\Models\AlmacenSalida;
 use App\Models\Auditoria;
 use App\Models\ClcMovimiento;
 use App\Models\ClcRelacion;
@@ -16,9 +18,11 @@ use App\Models\Proveedor;
 use App\Models\Regidor;
 use App\Models\SaldoMensual;
 use App\Models\User;
+use App\Services\Almacen;
 use App\Services\DistribucionMensual;
 use App\Services\PresupuestoService;
 use App\Services\SaldosMensuales;
+use App\Services\TramiteClc;
 use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -133,6 +137,11 @@ class PresupuestoLineaTest extends TestCase
         $this->post('/presupuesto', $this->linea(array_fill_keys(self::MESES, '')))->assertSessionHasErrors('distribucion');
 
         $this->assertSame(0, PresupuestoEgreso::count());
+
+        // Negativo no; en 0 sí se da de alta (recibe recursos después por modificaciones).
+        $this->post('/presupuesto', $this->linea(['IMPORTE_TOTAL' => '-1', ...array_fill_keys(self::MESES, '0')]))->assertSessionHasErrors('IMPORTE_TOTAL');
+        $this->post('/presupuesto', $this->linea(['IMPORTE_TOTAL' => '0', ...array_fill_keys(self::MESES, '0')]))->assertSessionHasNoErrors();
+        $this->assertEquals(0, PresupuestoEgreso::firstOrFail()->IMPORTE_TOTAL);
     }
 
     public function test_claves_fuera_de_catalogo_y_lineas_repetidas()
@@ -292,8 +301,8 @@ class PresupuestoLineaTest extends TestCase
 
         $momentos = fn () => $this->get('/presupuesto')->assertOk()->viewData('page')['props']['presupuestos']['data'][0];
 
-        // Con factura, los 300 pasan de comprometido a devengado; el disponible no cambia.
-        $this->assertEquals([200, 300, 0], [$momentos()['comprometido'], $momentos()['devengado'], $momentos()['pagado']]);
+        // Acumulativos: el comprometido incluye lo devengado (500) y el devengado incluye su historial; el disponible descuenta el comprometido.
+        $this->assertEquals([500, 300, 0], [$momentos()['comprometido'], $momentos()['devengado'], $momentos()['pagado']]);
         $linea = app(PresupuestoService::class)->linea('310|561|101001|2111');
         $this->assertEquals(round(1200.12 - 500, 2), $linea['disponible']);
 
@@ -366,7 +375,7 @@ class PresupuestoLineaTest extends TestCase
             ->where('clcs.0.transferencia', 'TRF-2026-0001')->where('clcs.0.pago_fecha', '2026-10-05'));
         $this->actingAs(User::role('Admin')->first());
         $this->assertSame(15, ClcMovimiento::where('orden_compra_id', $orden->id)->count()); // generar + 14 pasos
-        $this->assertEquals([200, 0, 300], [$momentos()['comprometido'], $momentos()['devengado'], $momentos()['pagado']]);
+        $this->assertEquals([500, 300, 300], [$momentos()['comprometido'], $momentos()['devengado'], $momentos()['pagado']]);
         $this->assertSame(EgresoRequisicion::PAGADA, (int) DB::table('tb_egreso_requisicion')->where('id_tb_egreso_requisicion', 1)->value('id_cat_egreso_requisicion_estado'));
 
         // El Excel de "Ejercicio y control del gasto" trae la línea con sus momentos como números.
@@ -376,11 +385,11 @@ class PresupuestoLineaTest extends TestCase
         $hoja = IOFactory::load($ruta)->getActiveSheet();
         $this->assertSame('Ejercicio y control del gasto', $hoja->getCell('A1')->getValue());
         $this->assertSame('2111', $hoja->getCell('G5')->getValue());
-        $this->assertEquals(200, $hoja->getCell('L5')->getValue()); // comprometido (lo pagado ya salió)
-        // Sin movimiento = 0, no celda vacía (modificado y devengado).
+        $this->assertEquals(500, $hoja->getCell('L5')->getValue()); // comprometido acumulado (incluye lo pagado)
+        // Sin movimiento = 0, no celda vacía (modificado).
         $this->assertNotNull($hoja->getCell('J5')->getValue());
         $this->assertEquals(0, $hoja->getCell('J5')->getValue());
-        $this->assertNotNull($hoja->getCell('M5')->getValue());
+        $this->assertEquals(300, $hoja->getCell('M5')->getValue()); // devengado acumulado (incluye lo pagado)
         $this->assertEquals(300, $hoja->getCell('N5')->getValue()); // pagado
         $this->assertSame('#,##0.00;[Red]-#,##0.00', $hoja->getStyle('L5')->getNumberFormat()->getFormatCode());
         $this->assertSame('=SUM(L5:L5)', $hoja->getCell('L6')->getValue());
@@ -989,13 +998,204 @@ class PresupuestoLineaTest extends TestCase
         $this->assertStringContainsString('Orden de compra OC-2026-0001 cancelada', $bitacora[1]);
         $this->assertStringContainsString('Requisición cancelada', $bitacora[2]);
         $this->get("/ordenes-compra/{$orden->id}/pdf")->assertForbidden(); // cancelada ya no se imprime
-        $this->get("/ordenes-compra/{$orden->id}/clc")->assertOk();
+        $this->get("/ordenes-compra/{$orden->id}/clc")->assertForbidden(); // cancelada ya no se imprime
+        $this->get('/requisiciones/1/pdf')->assertForbidden();
 
         // Cada paso exige su permiso.
         $sinPermiso = User::factory()->create();
         $sinPermiso->givePermissionTo('requisiciones-index');
         $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Prueba'])->assertForbidden();
         $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'Prueba'])->assertForbidden();
+    }
+
+    public function test_la_factura_de_una_orden_cancelada_se_carga_una_vez_mas()
+    {
+        Storage::fake('local');
+        $this->crearTablasRequisicion();
+        $this->post('/presupuesto', $this->linea());
+        $proveedor = Proveedor::create(['nombre' => 'DORACELI VALADEZ RODRIGUEZ', 'rfc' => 'VARD870519SR4', 'activo' => true]);
+        $ordenes = [];
+        foreach ([1, 2, 3] as $id) {
+            $this->requisicion($id, 4524);
+            $ordenes[$id] = OrdenCompra::create([
+                'id_tb_egreso_requisicion' => $id, 'proveedor_id' => $proveedor->id, 'folio' => $id, 'año' => 2026,
+                'folio_completo' => "OC-2026-000{$id}", 'fecha' => '2026-09-01', 'importe' => 4524,
+            ]);
+        }
+        $xml = fn () => UploadedFile::fake()->createWithContent('factura.xml', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Serie="1" Folio="273" Fecha="2026-09-01T08:26:09" SubTotal="3900.00" Total="4524.00" TipoDeComprobante="I">
+              <cfdi:Emisor Rfc="VARD870519SR4" Nombre="DORACELI VALADEZ RODRIGUEZ" RegimenFiscal="612" />
+              <cfdi:Receptor Rfc="MGU6501015R2" Nombre="MUNICIPIO DE GUADALUPE ZAC" UsoCFDI="G03" />
+              <cfdi:Complemento>
+                <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="1.1" UUID="E788CBF2-688D-473B-BCC1-340042ECC3A8" />
+              </cfdi:Complemento>
+            </cfdi:Comprobante>
+            XML);
+        $subir = fn (int $id) => $this->post("/ordenes-compra/{$ordenes[$id]->id}/xml", ['xml' => $xml()]);
+        $cancelar = fn (int $id) => $this->post("/ordenes-compra/{$ordenes[$id]->id}/cancelar", ['motivo' => 'Factura con error']);
+
+        $subir(1)->assertSessionHasNoErrors();
+        $subir(2)->assertSessionHasErrors('xml'); // ya está cargada en OC-2026-0001
+
+        // Al cancelar la orden se cancela su factura: queda en el historial y libre para cargarse otra vez.
+        $cancelar(1)->assertSessionHas('success');
+        $this->assertNull($ordenes[1]->fresh()->xml_uuid);
+        $this->assertSame('E788CBF2-688D-473B-BCC1-340042ECC3A8', $ordenes[1]->fresh()->xml_uuid_cancelado);
+        $this->assertEquals(0, app(PresupuestoService::class)->linea('310|561|101001|2111')['devengado']);
+        $subir(2)->assertSessionHasNoErrors();
+        $this->assertSame('E788CBF2-688D-473B-BCC1-340042ECC3A8', $ordenes[2]->fresh()->xml_uuid);
+
+        // Solo una vez: cancelada de nuevo, ya no se acepta.
+        $cancelar(2)->assertSessionHas('success');
+        $subir(3)->assertSessionHasErrors('xml');
+        $this->assertStringContainsString('solo se puede volver a cargar una vez', session('errors')->first('xml'));
+        $this->assertNull($ordenes[3]->fresh()->xml_uuid);
+    }
+
+    public function test_almacen_entradas_y_salidas_por_partes_conforme_a_la_orden_de_compra()
+    {
+        $this->crearTablasRequisicion();
+        $this->requisicion(1, 500);
+        DB::table('tb_egreso_requisicion_detalle')->where('id_tb_egreso_requisicion_detalle', 1)->update(['precio_unitario' => 50]);
+        Schema::table('tb_egreso_requisicion_detalle', function (Blueprint $t) {
+            $t->decimal('cantidad', 15, 2)->nullable();
+            $t->string('descripcion')->nullable();
+            $t->string('articulo')->nullable();
+        });
+        DB::table('tb_egreso_requisicion_detalle')->update(['cantidad' => 10, 'descripcion' => 'TÓNER 58A']);
+        $proveedor = Proveedor::create(['nombre' => 'PAPELERÍA', 'rfc' => 'VARD870519SR4', 'activo' => true]);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-10-01', 'importe' => 500,
+        ]);
+
+        // Sin asignar al almacén no hay entradas; Recursos Materiales la asigna (una vez).
+        $this->post("/almacen/{$orden->id}/entradas", ['fecha' => '2026-10-02', 'cantidades' => [1 => 4]])->assertSessionHasErrors('cantidades');
+        $this->post("/ordenes-compra/{$orden->id}/almacen")->assertSessionHas('success');
+        $this->assertNotNull($orden->fresh()->almacen_asignada_at);
+        $this->post("/ordenes-compra/{$orden->id}/almacen")->assertSessionHasErrors('orden');
+
+        // Entradas por partes, sin pasar de lo pedido (10).
+        $this->post("/almacen/{$orden->id}/entradas", ['fecha' => '2026-10-02', 'cantidades' => [1 => 4]])->assertSessionHasNoErrors();
+        $this->post("/almacen/{$orden->id}/entradas", ['fecha' => '2026-10-03', 'cantidades' => [1 => 7]])->assertSessionHasErrors('cantidades');
+        $this->post("/almacen/{$orden->id}/entradas", ['fecha' => '2026-10-03', 'cantidades' => [1 => 6]])->assertSessionHasNoErrors();
+        $this->assertSame(['EA-2026-0001', 'EA-2026-0002'], AlmacenEntrada::orderBy('id')->pluck('folio_completo')->all());
+
+        // Salidas por partes, hasta la existencia.
+        $this->post("/almacen/{$orden->id}/salidas", ['fecha' => '2026-10-04', 'recibe' => 'JUAN PÉREZ', 'cantidades' => [1 => 3]])->assertSessionHasNoErrors();
+        $this->post("/almacen/{$orden->id}/salidas", ['fecha' => '2026-10-04', 'cantidades' => [1 => 8]])->assertSessionHasErrors('cantidades');
+        $concepto = app(Almacen::class)->conceptos($orden->fresh())->first();
+        $this->assertEquals([10, 10, 3, 0, 7], [$concepto['pedido'], $concepto['recibido'], $concepto['entregado'], $concepto['por_recibir'], $concepto['existencia']]);
+
+        // Pantallas: bandeja, detalle e inventario (existencia × precio).
+        $this->get('/almacen')->assertOk()->assertInertia(fn ($p) => $p->component('almacen/Index')->where('ordenes.data.0.existencia', 7));
+        $this->get('/almacen?situacion=por_recibir')->assertInertia(fn ($p) => $p->where('ordenes.total', 0));
+        $this->get("/almacen/{$orden->id}")->assertOk()->assertInertia(fn ($p) => $p->where('entradas.1.folio', 'EA-2026-0002')->where('salidas.0.recibe', 'JUAN PÉREZ'));
+        $this->get('/almacen/inventario?buscar=toner')->assertOk()->assertInertia(fn ($p) => $p->where('conceptos.data.0.existencia', 7)->where('totales.valor', 350));
+
+        // Formatos: acta y entrada (por entrada) y salida.
+        $entrada = AlmacenEntrada::first();
+        $this->get("/almacen/entradas/{$entrada->id}/acta")->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->get("/almacen/entradas/{$entrada->id}/pdf")->assertOk()->assertHeader('content-type', 'application/pdf');
+        $this->get('/almacen/salidas/'.AlmacenSalida::first()->id.'/pdf')->assertOk()->assertHeader('content-type', 'application/pdf');
+        $html = view('almacen.entrada', ['documento' => $entrada->load('detalles', 'usuario'), 'orden' => $orden->fresh()->load('proveedor', 'requisicion')])->render();
+        $this->assertStringContainsString('CARLOS URIEL ESCOBEDO VENEGAS', $html);
+        $this->assertStringContainsString('DELIA ROMÁN GARCÍA', $html);
+
+        // Sin el permiso no se registran salidas.
+        $consulta = User::factory()->create();
+        $consulta->givePermissionTo('almacen-index');
+        $this->actingAs($consulta)->post("/almacen/{$orden->id}/salidas", ['fecha' => '2026-10-04', 'cantidades' => [1 => 1]])->assertForbidden();
+    }
+
+    public function test_recursos_materiales_regresa_la_requisicion_al_area_sin_stock()
+    {
+        $this->crearTablasRequisicion();
+        DB::table('cat_egreso_requisicion_estado')->insert(['id_cat_egreso_requisicion_estado' => 4, 'descripcion' => 'Rechazada']);
+        $this->requisicion(1, 100);
+        DB::table('tb_egreso_requisicion')->update(['id_cat_egreso_requisicion_estado' => EgresoRequisicion::EN_COTIZACION, 'suficiencia' => null]);
+
+        // Sin motivo no; con motivo queda No válida (4), editable por el área, y el motivo en la bitácora.
+        $this->post('/requisiciones/1/devolver-area', ['motivo' => ''])->assertSessionHasErrors('motivo');
+        $this->post('/requisiciones/1/devolver-area', ['motivo' => 'El tóner 58A no está en stock'])->assertRedirect('/recursos-materiales');
+        $this->assertSame(4, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+        $this->assertStringContainsString('Motivo: El tóner 58A no está en stock', DB::table('tb_egreso_requisicion_bitacora')->value('observaciones'));
+
+        // Ya regresada (o con suficiencia), no se vuelve a regresar; sin el permiso, tampoco.
+        $this->post('/requisiciones/1/devolver-area', ['motivo' => 'Otra vez'])->assertSessionHas('error');
+        $sinPermiso = User::factory()->create();
+        $sinPermiso->givePermissionTo('requisiciones-index');
+        $this->actingAs($sinPermiso)->post('/requisiciones/1/devolver-area', ['motivo' => 'Sin stock'])->assertForbidden();
+    }
+
+    public function test_pestana_de_facturas_con_validacion_sat_y_tramite()
+    {
+        $this->crearTablasRequisicion();
+        DB::table('cat_egreso_unidad_administrativa')->insert(['id_cat_egreso_unidad_administrativa' => 7, 'clave' => '320', 'nombre' => 'OTRA', 'año' => 2024, 'activo' => true]);
+        $proveedor = Proveedor::create(['nombre' => 'PAPELERÍA', 'activo' => true]);
+        foreach ([1 => 6, 2 => 7] as $id => $unidad) {
+            $this->requisicion($id, 100);
+            DB::table('tb_egreso_requisicion')->where('id_tb_egreso_requisicion', $id)->update(['id_cat_egreso_unidad_administrativa' => $unidad]);
+            OrdenCompra::create([
+                'id_tb_egreso_requisicion' => $id, 'proveedor_id' => $proveedor->id, 'folio' => $id, 'año' => 2026,
+                'folio_completo' => "OC-2026-000{$id}", 'fecha' => '2026-10-01', 'importe' => 100,
+                'xml_uuid' => "UUID-{$id}", 'xml_nombre_emisor' => $id === 1 ? 'PAPELERÍA DEL CENTRO' : 'FERRETERÍA', 'xml_folio' => "F{$id}",
+                'xml_total' => 100, 'xml_fecha' => '2026-10-01 10:00:00', 'xml_cargado_at' => now(),
+                'sat_estado' => $id === 1 ? 'Vigente' : null,
+                'clc_folio' => $id, 'clc_año' => 2026, 'clc_folio_completo' => "CLC-2026-000{$id}", 'clc_estado' => 'enviada_rm',
+            ]);
+        }
+
+        // Control (Admin) ve todas, con su validación y el paso de la CLC; filtra por SAT y por texto.
+        $this->get('/facturas')->assertOk()->assertInertia(fn ($p) => $p->component('facturas/Index')
+            ->where('totales.facturas', 2)->where('totales.total', 200)
+            ->where('facturas.data.1.sat_estado', 'Vigente')->where('facturas.data.1.clc_estado', 'Enviada a Recursos Materiales'));
+        $this->get('/facturas?sat=sin_verificar')->assertInertia(fn ($p) => $p->where('totales.facturas', 1)->where('facturas.data.0.orden', 'OC-2026-0002'));
+        $this->get('/facturas?buscar=centro')->assertInertia(fn ($p) => $p->where('totales.facturas', 1)->where('facturas.data.0.emisor', 'PAPELERÍA DEL CENTRO'));
+
+        // El área solo las de su secretaría; sin el permiso, no entra.
+        $area = User::factory()->create(['id_cat_egreso_unidad_administrativa' => 6]);
+        $area->givePermissionTo('facturas-index');
+        $this->actingAs($area)->get('/facturas')->assertInertia(fn ($p) => $p->where('totales.facturas', 1)->where('facturas.data.0.orden', 'OC-2026-0001'));
+        $this->actingAs(User::factory()->create())->get('/facturas')->assertForbidden();
+    }
+
+    public function test_quien_cancela_la_clc_depende_del_paso_del_tramite()
+    {
+        $this->crearTablasRequisicion();
+        $this->requisicion(1, 100);
+        $proveedor = Proveedor::create(['nombre' => 'PAPELERÍA', 'activo' => true]);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-10-01', 'importe' => 100, 'xml_uuid' => 'UUID-1',
+            'clc_folio' => 1, 'clc_año' => 2026, 'clc_folio_completo' => 'CLC-2026-0001', 'clc_fecha' => '2026-10-02', 'clc_estado' => 'generada',
+        ]);
+        Storage::fake('local');
+        $this->artisan('clc:usuarios-prueba')->assertSuccessful();
+        $usuario = fn (string $correo) => User::where('email', "{$correo}.prueba@sieg.test")->firstOrFail();
+        $puede = fn (string $correo, string $estado) => TramiteClc::impedimentoParaCancelar(tap($orden->fresh())->update(['clc_estado' => $estado])->refresh(), $usuario($correo)) === null;
+
+        // El área (de su unidad), hasta que Recursos Materiales la recibe.
+        $this->assertTrue($puede('area', 'enviada_rm'));
+        $this->assertFalse($puede('area', 'recibida_rm'));
+        // Recursos Materiales, hasta que la recibe Control Presupuestal.
+        $this->assertTrue($puede('recursos.materiales', 'enviada_cp'));
+        $this->assertFalse($puede('recursos.materiales', 'recibida_cp'));
+        // Control Presupuestal, hasta que llega a Sindicatura.
+        $this->assertTrue($puede('control.presupuestal', 'enviada_sindicatura'));
+        $this->assertFalse($puede('control.presupuestal', 'recibida_sindicatura'));
+        $this->assertFalse($puede('control.presupuestal', 'pagada'));
+        // Sindicatura y Egresos no cancelan; Admin siempre.
+        $this->assertFalse($puede('sindicatura', 'recibida_sindicatura'));
+        $this->assertTrue(TramiteClc::impedimentoParaCancelar($orden->fresh(), User::role('Admin')->first()) === null);
+
+        // Por la ruta: el área ya no puede si RM la recibió, con el motivo.
+        $orden->update(['clc_estado' => 'recibida_rm']);
+        $this->actingAs($usuario('area'))->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Ya no se ocupa'])->assertSessionHas('error');
+        $this->assertStringContainsString('el área ya no puede cancelarla', session('error'));
+        $this->actingAs($usuario('recursos.materiales'))->post("/ordenes-compra/{$orden->id}/cancelar-clc", ['motivo' => 'Ya no se ocupa'])->assertSessionHas('success');
+        $this->assertSame('cancelada', $orden->fresh()->clc_estado);
     }
 
     public function test_calendario_de_captura_y_autorizacion_de_extemporaneas()

@@ -28,7 +28,6 @@ import { fecha, fechaLocal, money } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Requisiciones', href: '/requisiciones' },
     { title: 'Trámite de CLC', href: '/clc' },
 ];
 
@@ -54,6 +53,27 @@ interface Clc extends EstadoSatFactura {
     devolucion: string | null;
     seguimiento: boolean;
 }
+
+type ColumnaFiltro =
+    | 'clc'
+    | 'orden'
+    | 'requisicion'
+    | 'unidad'
+    | 'proveedor'
+    | 'importe'
+    | 'relacion'
+    | 'estado';
+
+const FILTROS_VACIOS: Record<ColumnaFiltro, string> = {
+    clc: '',
+    orden: '',
+    requisicion: '',
+    unidad: '',
+    proveedor: '',
+    importe: '',
+    relacion: '',
+    estado: '',
+};
 
 interface Relacion {
     id: number;
@@ -263,6 +283,22 @@ export default function Index({
 
         return terminos.every((t) => texto.includes(t));
     };
+    // Filtros por columna (además del buscador general); valen para todas las tablas.
+    const [filtros, setFiltros] =
+        useState<Record<ColumnaFiltro, string>>(FILTROS_VACIOS);
+    const filtrar = (columna: ColumnaFiltro, texto: string) => {
+        setFiltros((f) => ({ ...f, [columna]: texto }));
+        setPaginas({});
+    };
+    const hayFiltros = Object.values(filtros).some((v) => v.trim() !== '');
+    const valorColumna = (c: Clc, columna: ColumnaFiltro) =>
+        columna === 'clc'
+            ? `${c.clc} ${c.transferencia ?? ''}`
+            : columna === 'estado'
+              ? (estados[c.estado] ?? c.estado)
+              : columna === 'importe'
+                ? `${c.importe} ${money(c.importe)}`
+                : String(c[columna] ?? '');
     const coincideClc = (c: Clc) =>
         coincide([
             c.clc,
@@ -274,7 +310,24 @@ export default function Index({
             c.transferencia,
             c.relacion,
             estados[c.estado],
-        ]);
+        ]) &&
+        (Object.keys(filtros) as ColumnaFiltro[]).every((columna) => {
+            const buscado = normalizar(filtros[columna].trim());
+
+            return (
+                buscado === '' ||
+                normalizar(valorColumna(c, columna)).includes(buscado)
+            );
+        });
+    const filtroColumna = (columna: ColumnaFiltro, ancho = 'w-full') => (
+        <input
+            value={filtros[columna]}
+            onChange={(e) => filtrar(columna, e.target.value)}
+            placeholder="Filtrar…"
+            aria-label={`Filtrar por ${columna}`}
+            className={`mt-1 block ${ancho} min-w-16 rounded border border-input bg-background px-1 py-0.5 text-xs font-normal`}
+        />
+    );
 
     const elegidos = (grupo: string) => seleccion[grupo] ?? [];
     const alternar = (grupo: string, id: number) =>
@@ -368,16 +421,42 @@ export default function Index({
                                     />
                                 </TableHead>
                             )}
-                            <TableHead>CLC</TableHead>
-                            <TableHead>O.C.</TableHead>
-                            <TableHead>Requisición</TableHead>
-                            <TableHead>Unidad administrativa</TableHead>
-                            <TableHead>Proveedor</TableHead>
-                            <TableHead className="text-right">
-                                Importe
+                            <TableHead className="py-2 align-top">
+                                CLC
+                                {filtroColumna('clc')}
                             </TableHead>
-                            {porRecibir && <TableHead>Relación</TableHead>}
-                            {!conSeleccion && <TableHead>Estado</TableHead>}
+                            <TableHead className="py-2 align-top">
+                                O.C.
+                                {filtroColumna('orden')}
+                            </TableHead>
+                            <TableHead className="py-2 align-top">
+                                Requisición
+                                {filtroColumna('requisicion')}
+                            </TableHead>
+                            <TableHead className="py-2 align-top">
+                                Unidad administrativa
+                                {filtroColumna('unidad')}
+                            </TableHead>
+                            <TableHead className="py-2 align-top">
+                                Proveedor
+                                {filtroColumna('proveedor')}
+                            </TableHead>
+                            <TableHead className="py-2 text-right align-top">
+                                Importe
+                                {filtroColumna('importe')}
+                            </TableHead>
+                            {porRecibir && (
+                                <TableHead className="py-2 align-top">
+                                    Relación
+                                    {filtroColumna('relacion')}
+                                </TableHead>
+                            )}
+                            {!conSeleccion && (
+                                <TableHead className="py-2 align-top">
+                                    Estado
+                                    {filtroColumna('estado')}
+                                </TableHead>
+                            )}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -387,7 +466,7 @@ export default function Index({
                                     colSpan={9}
                                     className="py-6 text-center text-muted-foreground"
                                 >
-                                    {terminos.length > 0
+                                    {terminos.length > 0 || hayFiltros
                                         ? 'Ninguna CLC coincide con la búsqueda.'
                                         : 'No hay CLC.'}
                                 </TableCell>
@@ -598,6 +677,18 @@ export default function Index({
                             className="w-full rounded-md border border-input bg-background py-1.5 pr-2 pl-7 text-sm"
                         />
                     </div>
+                    {hayFiltros && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setFiltros(FILTROS_VACIOS);
+                                setPaginas({});
+                            }}
+                            className="mb-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                        >
+                            Quitar filtros de columna
+                        </button>
+                    )}
                 </div>
 
                 {bandeja?.grupos.map((g, i) => {
@@ -623,7 +714,7 @@ export default function Index({
                                 <CardTitle className="flex items-center gap-2 text-base">
                                     {g.titulo}
                                     <Badge variant="secondary">
-                                        {terminos.length > 0
+                                        {terminos.length > 0 || hayFiltros
                                             ? `${filas.length} de ${enPaso.length}`
                                             : enPaso.length}
                                     </Badge>

@@ -450,8 +450,10 @@ export default function Index({
                                                 )}
                                                 {(req.id_cat_egreso_requisicion_estado ===
                                                     3 ||
-                                                    req.id_cat_egreso_requisicion_estado >=
-                                                        5) && (
+                                                    (req.id_cat_egreso_requisicion_estado >=
+                                                        5 &&
+                                                        req.id_cat_egreso_requisicion_estado !==
+                                                            12)) && (
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"

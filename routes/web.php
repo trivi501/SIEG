@@ -1,11 +1,13 @@
 <?php
 
 use App\Catalogos\Catalogos;
+use App\Http\Controllers\AlmacenController;
 use App\Http\Controllers\AuditoriaController;
 use App\Http\Controllers\CatalogoController;
 use App\Http\Controllers\ClcController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EgresoRequisicionController;
+use App\Http\Controllers\FacturaController;
 use App\Http\Controllers\ModificacionPresupuestalController;
 use App\Http\Controllers\OrdenCompraController;
 use App\Http\Controllers\PresupuestoController;
@@ -68,6 +70,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('requisiciones/{requisicion}/aprobar', [EgresoRequisicionController::class, 'aprobar'])->name('requisiciones.aprobar')->middleware('permission:requisiciones-edit');
     Route::post('requisiciones/{requisicion}/rechazar', [EgresoRequisicionController::class, 'rechazar'])->name('requisiciones.rechazar')->middleware('permission:requisiciones-edit');
     Route::post('requisiciones/{requisicion}/recursos-materiales', [EgresoRequisicionController::class, 'enviarRecursosMateriales'])->name('requisiciones.recursos')->middleware('permission:requisiciones-edit');
+    Route::post('requisiciones/{requisicion}/devolver-area', [EgresoRequisicionController::class, 'devolverArea'])->name('requisiciones.devolver-area')->middleware('permission:requisiciones-devolver');
     Route::post('requisiciones/{requisicion}/recibido', [EgresoRequisicionController::class, 'recibido'])->name('requisiciones.recibido')->middleware('permission:requisiciones-cotizar');
     Route::post('requisiciones', [EgresoRequisicionController::class, 'store'])->name('requisiciones.store')->middleware('permission:requisiciones-create');
     Route::get('requisiciones/crear', [EgresoRequisicionController::class, 'create'])->name('requisiciones.create')->middleware('permission:requisiciones-create');
@@ -82,6 +85,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('ordenes-compra/{ordenCompra}/pdf', [OrdenCompraController::class, 'pdf'])->name('ordenes-compra.pdf')->middleware('permission:requisiciones-index');
     Route::post('ordenes-compra/{ordenCompra}/xml', [OrdenCompraController::class, 'cargarXml'])->name('ordenes-compra.xml')->middleware('permission:ordenes-compra-create');
     // Trámite de CLC entre áreas (cada acción revisa su propio permiso en App\Services\TramiteClc).
+    // Almacén (conforme a la orden de compra): RM asigna la orden; el almacén registra entradas y salidas por partes.
+    Route::post('ordenes-compra/{ordenCompra}/almacen', [AlmacenController::class, 'asignar'])->name('almacen.asignar')->middleware('permission:ordenes-compra-almacen');
+    Route::get('almacen', [AlmacenController::class, 'index'])->name('almacen.index')->middleware('permission:almacen-index');
+    Route::get('almacen/inventario', [AlmacenController::class, 'inventario'])->name('almacen.inventario')->middleware('permission:almacen-index');
+    Route::get('almacen/entradas/{entrada}/pdf', [AlmacenController::class, 'entradaPdf'])->name('almacen.entradas.pdf')->middleware('permission:almacen-index');
+    Route::get('almacen/entradas/{entrada}/acta', [AlmacenController::class, 'actaPdf'])->name('almacen.entradas.acta')->middleware('permission:almacen-index');
+    Route::get('almacen/salidas/{salida}/pdf', [AlmacenController::class, 'salidaPdf'])->name('almacen.salidas.pdf')->middleware('permission:almacen-index');
+    Route::get('almacen/{ordenCompra}', [AlmacenController::class, 'show'])->name('almacen.show')->middleware('permission:almacen-index');
+    Route::post('almacen/{ordenCompra}/entradas', [AlmacenController::class, 'storeEntrada'])->name('almacen.entradas.store')->middleware('permission:almacen-entradas');
+    Route::post('almacen/{ordenCompra}/salidas', [AlmacenController::class, 'storeSalida'])->name('almacen.salidas.store')->middleware('permission:almacen-salidas');
+    Route::get('facturas', [FacturaController::class, 'index'])->name('facturas.index')->middleware('permission:facturas-index');
     Route::get('clc', [ClcController::class, 'index'])->name('clc.index')->middleware('permission:clc-index');
     Route::post('clc/accion', [ClcController::class, 'accion'])->name('clc.accion')->middleware('permission:clc-index');
     Route::get('clc/relaciones/{relacion}/pdf', [ClcController::class, 'relacionPdf'])->name('clc.relacion.pdf')->middleware('permission:clc-index');

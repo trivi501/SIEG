@@ -167,6 +167,7 @@ type Accion =
     | 'extemporanea'
     | 'clc'
     | 'cancelar'
+    | 'devolver'
     | 'cancelar_clc'
     | 'cancelar_orden';
 
@@ -181,6 +182,7 @@ export default function Show({
     puedeCambiarFechaOrden,
     puedeCancelar,
     puedeCancelarClc,
+    motivoNoCancelarClc,
     puedeCancelarOrden,
     estadosClc,
     proveedores,
@@ -196,6 +198,7 @@ export default function Show({
     puedeCambiarFechaOrden: boolean;
     puedeCancelar: boolean;
     puedeCancelarClc: boolean;
+    motivoNoCancelarClc: string | null;
     puedeCancelarOrden: boolean;
     estadosClc: Record<string, string>;
     proveedores: {
@@ -257,6 +260,7 @@ export default function Show({
         );
     // La bitácora inicia cerrada para que no ocupe espacio; muestra su último movimiento.
     const [verBitacora, setVerBitacora] = useState(false);
+    const [verTramite, setVerTramite] = useState(false);
     const [editarFecha, setEditarFecha] = useState<
         'requisicion' | 'orden' | null
     >(null);
@@ -269,11 +273,6 @@ export default function Show({
     const [nuevoProveedor, setNuevoProveedor] = useState(false);
     const proveedorForm = useForm({ nombre: '', rfc: '', activo: true });
     const xmlForm = useForm<{ xml: File | null }>({ xml: null });
-    const pagoForm = useForm({
-        pago_fecha: new Date().toISOString().slice(0, 10),
-        pago_forma: 'transferencia',
-        pago_referencia: '',
-    });
 
     const post = (accion: string, options = {}) =>
         router.post(
@@ -328,13 +327,6 @@ export default function Show({
             preserveScroll: true,
             forceFormData: true,
             onSuccess: () => xmlForm.reset(),
-        });
-    };
-
-    const registrarPago = (e: React.FormEvent) => {
-        e.preventDefault();
-        pagoForm.post(`/ordenes-compra/${orden?.id}/pago`, {
-            preserveScroll: true,
         });
     };
 
@@ -417,6 +409,26 @@ export default function Show({
             },
             ejecutar: (motivo, op) =>
                 router.post(`/requisiciones/${id}/rechazar`, { motivo }, op),
+        },
+        devolver: {
+            titulo: 'Regresar al área',
+            descripcion:
+                'Por ejemplo, cuando un producto no está en stock: la requisición regresa al área para que la modifique y la vuelva a enviar. El motivo queda en la bitácora.',
+            tono: 'aviso',
+            textoConfirmar: 'Regresar al área',
+            a: 'No válida (la modifica el área)',
+            motivo: {
+                etiqueta: 'Motivo',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Qué producto no hay en stock o qué debe cambiar…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(
+                    `/requisiciones/${id}/devolver-area`,
+                    { motivo },
+                    op,
+                ),
         },
         recursos: {
             titulo: 'Enviar a Recursos Materiales',
@@ -543,8 +555,38 @@ export default function Show({
                     },
                 ],
             },
-            ejecutar: (_, op) =>
-                router.post(`/ordenes-compra/${orden?.id}/clc`, {}, op),
+            // Al generarse, abre su PDF en otra pestaña. La pestaña se abre en el clic (si se abriera al
+            // terminar, el navegador la bloquearía como ventana emergente) y se cierra si no se generó.
+            ejecutar: (_, op) => {
+                const ventana = window.open('', '_blank');
+                ventana?.document.write(
+                    '<p style="font-family:sans-serif">Generando la CLC…</p>',
+                );
+
+                router.post(
+                    `/ordenes-compra/${orden?.id}/clc`,
+                    {},
+                    {
+                        ...op,
+                        onSuccess: (p) => {
+                            const oc = (p.props.requisicion as any)
+                                ?.orden_compra;
+
+                            if (ventana && oc?.clc_folio_completo) {
+                                ventana.location.href = `/ordenes-compra/${oc.id}/clc`;
+                            } else {
+                                ventana?.close();
+                            }
+
+                            op?.onSuccess?.(p);
+                        },
+                        onError: (e) => {
+                            ventana?.close();
+                            op?.onError?.(e);
+                        },
+                    },
+                );
+            },
         },
     };
     const config = accion ? acciones[accion] : null;
@@ -897,6 +939,18 @@ export default function Show({
                                             </span>{' '}
                                             {orden.motivo_cancelacion}
                                         </p>
+                                        {orden.xml_uuid_cancelado && (
+                                            <p className="mt-1">
+                                                <span className="font-medium">
+                                                    Factura cancelada:
+                                                </span>{' '}
+                                                <span className="font-mono text-xs">
+                                                    {orden.xml_uuid_cancelado}
+                                                </span>{' '}
+                                                (se puede cargar una vez más en
+                                                otra orden de compra)
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                                 {!requisicion.cancelada_at &&
@@ -1032,6 +1086,44 @@ export default function Show({
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
+                                    {/* Almacén: Recursos Materiales asigna la orden para que el almacén reciba los bienes. */}
+                                    {!orden.cancelada_at &&
+                                        !orden.almacen_asignada_at &&
+                                        puede('ordenes-compra-almacen') && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() =>
+                                                    router.post(
+                                                        `/ordenes-compra/${orden.id}/almacen`,
+                                                        {},
+                                                        {
+                                                            preserveScroll: true,
+                                                        },
+                                                    )
+                                                }
+                                            >
+                                                Asignar al almacén
+                                            </Button>
+                                        )}
+                                    {orden.almacen_asignada_at &&
+                                        (puede('almacen-index') ? (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                asChild
+                                            >
+                                                <Link
+                                                    href={`/almacen/${orden.id}`}
+                                                >
+                                                    Ver en almacén
+                                                </Link>
+                                            </Button>
+                                        ) : (
+                                            <Badge variant="secondary">
+                                                Asignada al almacén
+                                            </Badge>
+                                        ))}
                                     {/* Cancelada ya no se imprime. */}
                                     {!orden.cancelada_at && (
                                         <Button
@@ -1061,21 +1153,22 @@ export default function Show({
                                             </a>
                                         </Button>
                                     )}
-                                    {orden.clc_folio_completo && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            asChild
-                                        >
-                                            <a
-                                                href={`/ordenes-compra/${orden.id}/clc`}
-                                                target="_blank"
+                                    {orden.clc_folio_completo &&
+                                        !orden.clc_cancelada_at && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                asChild
                                             >
-                                                <FileText className="mr-1 h-4 w-4" />{' '}
-                                                Imprimir CLC
-                                            </a>
-                                        </Button>
-                                    )}
+                                                <a
+                                                    href={`/ordenes-compra/${orden.id}/clc`}
+                                                    target="_blank"
+                                                >
+                                                    <FileText className="mr-1 h-4 w-4" />{' '}
+                                                    Imprimir CLC
+                                                </a>
+                                            </Button>
+                                        )}
                                     {orden.xml_uuid &&
                                         !orden.clc_folio_completo &&
                                         !orden.cancelada_at &&
@@ -1211,152 +1304,96 @@ export default function Show({
                                     )}
 
                                 {(orden.movimientos_clc ?? []).length > 0 && (
-                                    <div className="rounded-md border p-3">
-                                        <p className="mb-2 font-semibold">
-                                            Trámite de la CLC
-                                        </p>
-                                        <ol className="space-y-1 text-xs">
-                                            {orden.movimientos_clc.map(
-                                                (m: any) => (
-                                                    <li
-                                                        key={m.id}
-                                                        className="flex flex-wrap gap-x-2"
-                                                    >
-                                                        <span className="text-muted-foreground">
-                                                            {fechaLocal(
-                                                                m.created_at,
-                                                            )}
-                                                        </span>
-                                                        <span className="font-medium">
-                                                            {estadosClc[
-                                                                m.estado_nuevo
-                                                            ] ?? m.estado_nuevo}
-                                                        </span>
-                                                        <span className="text-muted-foreground">
-                                                            ·{' '}
-                                                            {m.usuario?.name ??
-                                                                '—'}
-                                                        </span>
-                                                        {m.observaciones && (
-                                                            <span className="w-full text-red-700">
-                                                                {
-                                                                    m.observaciones
-                                                                }
-                                                            </span>
+                                    <div className="rounded-md border">
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                setVerTramite((v) => !v)
+                                            }
+                                            aria-expanded={verTramite}
+                                            className="flex w-full items-center gap-2 rounded-md p-3 text-left hover:bg-muted/40"
+                                        >
+                                            <ChevronDown
+                                                className={`h-4 w-4 shrink-0 transition-transform ${verTramite ? '' : '-rotate-90'}`}
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                                <span className="font-semibold">
+                                                    Trámite de la CLC (
+                                                    {
+                                                        orden.movimientos_clc
+                                                            .length
+                                                    }
+                                                    )
+                                                </span>
+                                                {!verTramite && (
+                                                    <span className="block truncate text-xs text-muted-foreground">
+                                                        Último:{' '}
+                                                        {estadosClc[
+                                                            orden
+                                                                .movimientos_clc[
+                                                                orden
+                                                                    .movimientos_clc
+                                                                    .length - 1
+                                                            ]?.estado_nuevo
+                                                        ] ?? '—'}{' '}
+                                                        ·{' '}
+                                                        {fechaLocal(
+                                                            orden
+                                                                .movimientos_clc[
+                                                                orden
+                                                                    .movimientos_clc
+                                                                    .length - 1
+                                                            ]?.created_at,
                                                         )}
-                                                    </li>
-                                                ),
-                                            )}
-                                        </ol>
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className="shrink-0 text-xs text-muted-foreground">
+                                                {verTramite
+                                                    ? 'Ocultar'
+                                                    : 'Ver todo'}
+                                            </span>
+                                        </button>
+                                        {verTramite && (
+                                            <ol className="space-y-1 px-3 pb-3 text-xs">
+                                                {orden.movimientos_clc.map(
+                                                    (m: any) => (
+                                                        <li
+                                                            key={m.id}
+                                                            className="flex flex-wrap gap-x-2"
+                                                        >
+                                                            <span className="text-muted-foreground">
+                                                                {fechaLocal(
+                                                                    m.created_at,
+                                                                )}
+                                                            </span>
+                                                            <span className="font-medium">
+                                                                {estadosClc[
+                                                                    m
+                                                                        .estado_nuevo
+                                                                ] ??
+                                                                    m.estado_nuevo}
+                                                            </span>
+                                                            <span className="text-muted-foreground">
+                                                                ·{' '}
+                                                                {m.usuario
+                                                                    ?.name ??
+                                                                    '—'}
+                                                            </span>
+                                                            {m.observaciones && (
+                                                                <span className="w-full text-red-700">
+                                                                    {
+                                                                        m.observaciones
+                                                                    }
+                                                                </span>
+                                                            )}
+                                                        </li>
+                                                    ),
+                                                )}
+                                            </ol>
+                                        )}
                                     </div>
                                 )}
-
-                                {orden.clc_folio_completo &&
-                                    !orden.pago_fecha &&
-                                    orden.clc_estado === 'recibida_egresos' &&
-                                    puede('ordenes-compra-pagar') && (
-                                        <form
-                                            onSubmit={registrarPago}
-                                            className="space-y-2 rounded-md border p-3"
-                                        >
-                                            <p className="font-semibold">
-                                                Registrar pago
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                Pago de {money(orden.importe)} a{' '}
-                                                {orden.proveedor?.nombre}. Pasa
-                                                el importe a "pagado" en el
-                                                presupuesto.
-                                            </p>
-                                            <div className="flex flex-wrap items-end gap-2">
-                                                <label className="grid gap-1 text-xs">
-                                                    Fecha
-                                                    <input
-                                                        type="date"
-                                                        value={
-                                                            pagoForm.data
-                                                                .pago_fecha
-                                                        }
-                                                        onChange={(e) =>
-                                                            pagoForm.setData(
-                                                                'pago_fecha',
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        className="rounded-md border border-input px-2 py-1 text-sm"
-                                                    />
-                                                </label>
-                                                <label className="grid gap-1 text-xs">
-                                                    Forma de pago
-                                                    <select
-                                                        value={
-                                                            pagoForm.data
-                                                                .pago_forma
-                                                        }
-                                                        onChange={(e) =>
-                                                            pagoForm.setData(
-                                                                'pago_forma',
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        className="rounded-md border border-input bg-transparent px-2 py-1 text-sm"
-                                                    >
-                                                        <option value="transferencia">
-                                                            Transferencia
-                                                        </option>
-                                                        <option value="cheque">
-                                                            Cheque
-                                                        </option>
-                                                    </select>
-                                                </label>
-                                                <label className="grid gap-1 text-xs">
-                                                    {pagoForm.data
-                                                        .pago_forma ===
-                                                    'transferencia'
-                                                        ? 'Referencia bancaria (opcional; el número de transferencia se genera solo)'
-                                                        : 'Número de cheque'}
-                                                    <input
-                                                        value={
-                                                            pagoForm.data
-                                                                .pago_referencia
-                                                        }
-                                                        onChange={(e) =>
-                                                            pagoForm.setData(
-                                                                'pago_referencia',
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        maxLength={100}
-                                                        className="w-64 rounded-md border border-input px-2 py-1 text-sm"
-                                                    />
-                                                </label>
-                                                <Button
-                                                    type="submit"
-                                                    size="sm"
-                                                    disabled={
-                                                        (pagoForm.data
-                                                            .pago_forma !==
-                                                            'transferencia' &&
-                                                            !pagoForm.data
-                                                                .pago_referencia) ||
-                                                        pagoForm.processing
-                                                    }
-                                                >
-                                                    Registrar pago
-                                                </Button>
-                                            </div>
-                                            {Object.values(pagoForm.errors).map(
-                                                (error) => (
-                                                    <p
-                                                        key={error}
-                                                        className="text-sm text-destructive"
-                                                    >
-                                                        {error}
-                                                    </p>
-                                                ),
-                                            )}
-                                        </form>
-                                    )}
 
                                 {!orden.xml_uuid &&
                                     !orden.cancelada_at &&
@@ -1534,6 +1571,12 @@ export default function Show({
                                 Cancelar CLC
                             </Button>
                         )}
+                        {motivoNoCancelarClc && (
+                            <span className="text-xs text-muted-foreground">
+                                No se puede cancelar la CLC:{' '}
+                                {motivoNoCancelarClc}
+                            </span>
+                        )}
                         {puedeCancelarOrden && (
                             <Button
                                 variant="outline"
@@ -1588,7 +1631,8 @@ export default function Show({
                                 </Button>
                             </>
                         )}
-                        {(esAprobado || estado >= 5) && (
+                        {/* Cancelada (12) ya no se imprime. */}
+                        {(esAprobado || (estado >= 5 && estado !== 12)) && (
                             <Button variant="outline" asChild>
                                 <a
                                     href={`/requisiciones/${id}/pdf`}
@@ -1608,6 +1652,17 @@ export default function Show({
                             puede('requisiciones-cotizar') && (
                                 <Button onClick={() => setAccion('recibido')}>
                                     Recibido - Iniciar Cotización
+                                </Button>
+                            )}
+                        {(esRecursosMateriales || esCotizacion) &&
+                            requisicion.suficiencia !== true &&
+                            puede('requisiciones-devolver') && (
+                                <Button
+                                    variant="outline"
+                                    className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                                    onClick={() => setAccion('devolver')}
+                                >
+                                    Regresar al área
                                 </Button>
                             )}
                         {esCotizacion &&

@@ -381,7 +381,10 @@ class EgresoRequisicionController extends Controller
             'estadosClc' => collect(TramiteClc::ESTADOS)->map(fn ($e) => $e[0]),
             'puedeCambiarFechaOrden' => $user->can('ordenes-compra-fecha') && ! $requisicion->ordenCompra?->cancelada_at,
             // Cancelación escalonada: primero la CLC, luego la orden de compra (puedeCancelar es la requisición).
-            'puedeCancelarClc' => $user->can('clc-cancelar') && (bool) $requisicion->ordenCompra?->clcActiva(),
+            'puedeCancelarClc' => $requisicion->ordenCompra && TramiteClc::impedimentoParaCancelar($requisicion->ordenCompra, $user) === null,
+            // Si la CLC está vigente pero ya no le toca cancelarla, por qué (se muestra junto al botón).
+            'motivoNoCancelarClc' => $requisicion->ordenCompra?->clcActiva() && $user->can('clc-cancelar')
+                ? TramiteClc::impedimentoParaCancelar($requisicion->ordenCompra, $user) : null,
             'puedeCancelarOrden' => $user->can('ordenes-compra-cancelar') && $requisicion->ordenCompra
                 && ! $requisicion->ordenCompra->cancelada_at && ! $requisicion->ordenCompra->clcActiva(),
             // Para generar la orden de compra o reasignar su proveedor (mientras no tenga factura).
@@ -818,6 +821,28 @@ class EgresoRequisicionController extends Controller
         return redirect()->route('requisiciones.index')->with('success', "Requisición {$requisicion->folio_completo} rechazada.");
     }
 
+    /**
+     * Recursos Materiales regresa la requisición al área (p. ej. un producto que no está en stock) para que
+     * la modifique y la vuelva a enviar. Queda como No válida (4), editable por el área, con el motivo.
+     */
+    public function devolverArea(Request $request, EgresoRequisicion $requisicion)
+    {
+        $validated = $request->validate(
+            ['motivo' => 'required|string|min:5|max:1000'],
+            ['motivo.required' => 'Escribe por qué se regresa al área.', 'motivo.min' => 'Explica por qué se regresa al área.'],
+        );
+        if ($requisicion->suficiencia === true) {
+            return back()->with('error', 'Ya tiene suficiencia presupuestal: ya no se regresa al área.');
+        }
+
+        $observaciones = 'Regresada al área por Recursos Materiales ('.auth()->user()->name.') para que la modifique. Motivo: '.trim($validated['motivo']);
+        if (! $this->cambiarEstado($requisicion, 5, 4, $observaciones) && ! $this->cambiarEstado($requisicion, 6, 4, $observaciones)) {
+            return back()->with('error', 'Solo se regresa al área una requisición en Recursos Materiales o en cotización.');
+        }
+
+        return redirect()->route('recursos-materiales.index')->with('success', "Requisición {$requisicion->folio_completo} regresada al área para que la modifique.");
+    }
+
     public function enviarRecursosMateriales(EgresoRequisicion $requisicion)
     {
         if (! $this->cambiarEstado($requisicion, 3, 5, 'Enviado a Recursos Materiales. PDF firmado por el titular.')) {
@@ -1121,7 +1146,8 @@ class EgresoRequisicionController extends Controller
     public function pdf(EgresoRequisicion $requisicion)
     {
         if (! in_array($requisicion->id_cat_egreso_requisicion_estado, [3, ...self::ESTADOS_RECURSOS_MATERIALES], true)) {
-            abort(403, 'El PDF solo está disponible para requisiciones validadas.');
+            // Una cancelada (12) tampoco se imprime.
+            abort(403, 'El PDF solo está disponible para requisiciones validadas y no canceladas.');
         }
         $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoUnidadAdministrativa');
         $pdf = Pdf::loadView('requisiciones.pdf', compact('requisicion'))->setPaper('letter');

@@ -66,9 +66,12 @@ class PresupuestoService
             $asignado = (float) $p->IMPORTE_TOTAL;
             $mod = $modificado[$clave] ?? 0.0;
             $vigente = $asignado + $mod;
-            $comp = $comprometido[$clave] ?? 0.0;
-            $dev = $devengado[$clave] ?? 0.0;
+            // Momentos acumulativos: el comprometido incluye todo lo comprometido (también lo ya devengado y
+            // pagado), el devengado todo el historial de devengado (también lo pagado) y el pagado lo pagado.
+            // El disponible descuenta solo el comprometido acumulado.
             $pag = $pagado[$clave] ?? 0.0;
+            $dev = ($devengado[$clave] ?? 0.0) + $pag;
+            $comp = ($comprometido[$clave] ?? 0.0) + $dev;
 
             return [
                 'clave' => $clave,
@@ -87,7 +90,7 @@ class PresupuestoService
                 'en_tramite' => round($enTramite[$clave] ?? 0.0, 2),
                 'devengado' => round($dev, 2),
                 'pagado' => round($pag, 2),
-                'disponible' => round($vigente - $comp - $dev - $pag, 2),
+                'disponible' => round($vigente - $comp, 2),
             ];
         })->values();
     }
@@ -136,8 +139,8 @@ class PresupuestoService
                 'existe' => $linea !== null,
                 'requerido' => round($monto, 2),
                 'vigente' => $linea['vigente'] ?? 0,
-                // Todo lo ya ejercido de la línea (comprometido + devengado + pagado).
-                'comprometido' => round(($linea['comprometido'] ?? 0) + ($linea['devengado'] ?? 0) + ($linea['pagado'] ?? 0) + $propio, 2),
+                // Comprometido acumulado de la línea (ya incluye lo devengado y lo pagado).
+                'comprometido' => round(($linea['comprometido'] ?? 0) + $propio, 2),
                 'disponible' => round(($linea['disponible'] ?? 0) - $propio, 2),
                 'faltante' => $ok ? 0 : round($monto - ($linea['disponible'] ?? 0), 2),
                 'suficiente' => $ok,

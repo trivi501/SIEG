@@ -83,7 +83,9 @@ export default function PresupuestoLineaForm({
         0,
     );
     const diferencia = total - distribuido;
-    const cuadra = total > 0 && diferencia === 0;
+    // Se puede dar de alta en 0: basta con capturar el importe y que los meses cuadren.
+    const capturado = String(form.data.IMPORTE_TOTAL ?? '').trim() !== '';
+    const cuadra = capturado && diferencia === 0;
 
     const partida = catalogos.partidas.find(
         (p) => p.clave === form.data.PARTIDA,
@@ -252,7 +254,7 @@ export default function PresupuestoLineaForm({
                         </span>
                         <span>
                             {diferencia === 0
-                                ? total > 0
+                                ? capturado
                                     ? 'La distribución cuadra.'
                                     : 'Captura el importe total.'
                                 : diferencia > 0
@@ -275,7 +277,7 @@ export default function PresupuestoLineaForm({
                 <Button variant="outline" asChild>
                     <Link href="/presupuesto">Cancelar</Link>
                 </Button>
-                {!cuadra && total > 0 && (
+                {!cuadra && capturado && (
                     <span className="text-sm text-muted-foreground">
                         Para guardar, los meses deben sumar exactamente el
                         importe total.

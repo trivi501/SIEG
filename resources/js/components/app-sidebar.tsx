@@ -1,6 +1,16 @@
 import { Link, usePage } from '@inertiajs/react';
+import {
+    BookOpen,
+    Building2,
+    LayoutGrid,
+    Wallet,
+    ClipboardCheck,
+    TrendingUp,
+    FileText,
+    Receipt,
+    Warehouse,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Building2, LayoutGrid, Wallet, ClipboardCheck, TrendingUp } from 'lucide-react';
 import AppLogo from '@/components/app-logo';
 import { NavAdmin } from '@/components/nav-admin';
 import { NavMain } from '@/components/nav-main';
@@ -15,17 +25,24 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import { SidebarGroup, SidebarGroupLabel } from '@/components/ui/sidebar';
 import { dashboard, presupuesto } from '@/routes';
 import type { NavItem } from '@/types';
 
 /** `catalogos-*` = cualquier permiso que empiece con "catalogos-". */
 function hasPermission(permission?: string): boolean {
-    if (!permission) return true;
+    if (!permission) {
+        return true;
+    }
+
     const perms = (usePage().props.userPermissions as string[]) ?? [];
+
     if (permission.endsWith('*')) {
         const prefijo = permission.slice(0, -1);
+
         return perms.some((p) => p.startsWith(prefijo));
     }
+
     return perms.includes(permission);
 }
 
@@ -35,24 +52,62 @@ function getCurrentPath(): string {
 
 function findActiveSection(path: string): SectionKey | null {
     // "Ejercicio y control del gasto" es una entrada propia (debajo de Presupuesto), no abre el grupo Requisiciones.
-    if (path.startsWith('/requisiciones/gasto')) return null;
-    if (path.startsWith('/requisiciones') || path.startsWith('/recursos-materiales') || path.startsWith('/catalogos/proveedores') || path.startsWith('/modificaciones-presupuestales') || path.startsWith('/clc')) return 'Requisiciones';
-    if (path.startsWith('/settings/users') || path.startsWith('/settings/roles') || path.startsWith('/settings/permissions') || path.startsWith('/auditoria')) return 'Administración';
-    if (path.startsWith('/settings/profile') || path.startsWith('/settings/security') || path.startsWith('/settings/appearance')) return 'Ajustes';
+    if (path.startsWith('/requisiciones/gasto')) {
+        return null;
+    }
+
+    if (
+        path.startsWith('/requisiciones') ||
+        path.startsWith('/recursos-materiales') ||
+        path.startsWith('/catalogos/proveedores') ||
+        path.startsWith('/modificaciones-presupuestales')
+    ) {
+        return 'Requisiciones';
+    }
+
+    if (path.startsWith('/almacen')) return 'Almacén';
+    if (
+        path.startsWith('/settings/users') ||
+        path.startsWith('/settings/roles') ||
+        path.startsWith('/settings/permissions') ||
+        path.startsWith('/auditoria')
+    ) {
+        return 'Administración';
+    }
+
+    if (
+        path.startsWith('/settings/profile') ||
+        path.startsWith('/settings/security') ||
+        path.startsWith('/settings/appearance')
+    ) {
+        return 'Ajustes';
+    }
+
     return null;
 }
 
 function filterItems(items: NavItem[]): NavItem[] {
     return items.filter((item) => {
-        if (!hasPermission(item.permission)) return false;
-        if (item.items) {
-            item.items = item.items.filter((sub) => hasPermission(sub.permission));
+        if (!hasPermission(item.permission)) {
+            return false;
         }
+
+        if (item.items) {
+            item.items = item.items.filter((sub) =>
+                hasPermission(sub.permission),
+            );
+        }
+
         return true;
     });
 }
 
-const SECTION_KEYS = ['Requisiciones', 'Administración', 'Ajustes'] as const;
+const SECTION_KEYS = [
+    'Requisiciones',
+    'Almacén',
+    'Administración',
+    'Ajustes',
+] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
 
 const mainNavItems: NavItem[] = [
@@ -77,12 +132,60 @@ const mainNavItems: NavItem[] = [
         title: 'Requisiciones',
         icon: ClipboardCheck,
         items: [
-            { title: 'Listado', href: '/requisiciones', permission: 'requisiciones-index' },
-            { title: 'Nueva', href: '/requisiciones/crear', permission: 'requisiciones-create' },
-            { title: 'Recursos Materiales', href: '/recursos-materiales', permission: 'recursos-materiales-index' },
-            { title: 'Proveedores', href: '/catalogos/proveedores', permission: 'proveedores-index' },
-            { title: 'Modificaciones Presupuestales', href: '/modificaciones-presupuestales', permission: 'modificaciones-index' },
-            { title: 'Trámite de CLC', href: '/clc', permission: 'clc-index' },
+            {
+                title: 'Listado',
+                href: '/requisiciones',
+                permission: 'requisiciones-index',
+            },
+            {
+                title: 'Nueva',
+                href: '/requisiciones/crear',
+                permission: 'requisiciones-create',
+            },
+            {
+                title: 'Recursos Materiales',
+                href: '/recursos-materiales',
+                permission: 'recursos-materiales-index',
+            },
+            {
+                title: 'Proveedores',
+                href: '/catalogos/proveedores',
+                permission: 'proveedores-index',
+            },
+            {
+                title: 'Modificaciones Presupuestales',
+                href: '/modificaciones-presupuestales',
+                permission: 'modificaciones-index',
+            },
+        ],
+    },
+    // Trámite de CLC y Facturas son entradas propias, fuera del grupo Requisiciones.
+    {
+        title: 'Trámite de CLC',
+        href: '/clc',
+        icon: FileText,
+        permission: 'clc-index',
+    },
+    {
+        title: 'Facturas',
+        href: '/facturas',
+        icon: Receipt,
+        permission: 'facturas-index',
+    },
+    {
+        title: 'Almacén',
+        icon: Warehouse,
+        items: [
+            {
+                title: 'Órdenes de compra',
+                href: '/almacen',
+                permission: 'almacen-index',
+            },
+            {
+                title: 'Inventario',
+                href: '/almacen/inventario',
+                permission: 'almacen-index',
+            },
         ],
     },
 ];
@@ -102,14 +205,15 @@ const moduleNavItems: NavItem[] = [
     },
 ];
 
-import { SidebarGroup, SidebarGroupLabel } from '@/components/ui/sidebar';
-
 export function AppSidebar() {
     const { url } = usePage();
     const filteredMain = filterItems(mainNavItems);
     const filteredModules = filterItems(moduleNavItems);
 
-    const urlSection = useMemo(() => findActiveSection(getCurrentPath() || url), [url]);
+    const urlSection = useMemo(
+        () => findActiveSection(getCurrentPath() || url),
+        [url],
+    );
     const [manualSection, setManualSection] = useState<SectionKey | null>(null);
 
     const openSection = manualSection ?? urlSection;
@@ -147,7 +251,7 @@ export function AppSidebar() {
                     items={filteredMain}
                     openSections={navOpenSections}
                     onToggle={(title) => {
-                        if (title === 'Requisiciones') {
+                        if (title === 'Requisiciones' || title === 'Almacén') {
                             toggleSection(title);
                         }
                     }}
@@ -158,7 +262,10 @@ export function AppSidebar() {
                         <SidebarMenu>
                             {filteredModules.map((item) => (
                                 <SidebarMenuItem key={item.title}>
-                                    <SidebarMenuButton asChild tooltip={{ children: item.title }}>
+                                    <SidebarMenuButton
+                                        asChild
+                                        tooltip={{ children: item.title }}
+                                    >
                                         <Link href={item.href!} prefetch>
                                             {item.icon && <item.icon />}
                                             <span>{item.title}</span>
@@ -169,8 +276,14 @@ export function AppSidebar() {
                         </SidebarMenu>
                     </SidebarGroup>
                 )}
-                <NavAdmin open={openSection === 'Administración'} onToggle={() => toggleSection('Administración')} />
-                <NavSettings open={openSection === 'Ajustes'} onToggle={() => toggleSection('Ajustes')} />
+                <NavAdmin
+                    open={openSection === 'Administración'}
+                    onToggle={() => toggleSection('Administración')}
+                />
+                <NavSettings
+                    open={openSection === 'Ajustes'}
+                    onToggle={() => toggleSection('Ajustes')}
+                />
             </SidebarContent>
 
             <SidebarFooter>

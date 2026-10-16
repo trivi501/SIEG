@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Catalogos\Catalogos;
+use App\Models\AlmacenEntrada;
+use App\Models\AlmacenEntradaDetalle;
+use App\Models\AlmacenSalida;
+use App\Models\AlmacenSalidaDetalle;
 use App\Models\Auditoria;
 use App\Models\ClcRelacion;
 use App\Models\EgresoRequisicion;
@@ -40,6 +44,10 @@ class AuditoriaController extends Controller
             'fecha' => 'Fecha', 'importe' => 'Importe', 'observaciones' => 'Observaciones',
             'xml_uuid' => 'UUID de la factura', 'xml_rfc_emisor' => 'RFC emisor', 'xml_total' => 'Total de la factura',
         ]],
+        AlmacenEntrada::class => ['Entradas de almacén', ['folio_completo' => 'Folio', 'orden_compra_id' => 'Orden de compra', 'fecha' => 'Fecha', 'observaciones' => 'Observaciones']],
+        AlmacenEntradaDetalle::class => ['Conceptos de entradas de almacén', ['descripcion' => 'Descripción', 'cantidad' => 'Cantidad', 'precio_unitario' => 'Precio unitario']],
+        AlmacenSalida::class => ['Salidas de almacén', ['folio_completo' => 'Folio', 'orden_compra_id' => 'Orden de compra', 'fecha' => 'Fecha', 'recibe' => 'Recibe', 'observaciones' => 'Observaciones']],
+        AlmacenSalidaDetalle::class => ['Conceptos de salidas de almacén', ['descripcion' => 'Descripción', 'cantidad' => 'Cantidad']],
         ClcRelacion::class => ['Relaciones de CLC', [
             'folio_completo' => 'Folio', 'origen' => 'Entrega', 'destino' => 'Recibe', 'observaciones' => 'Observaciones',
         ]],

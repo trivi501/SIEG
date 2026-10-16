@@ -38,6 +38,7 @@ class SyncPermissions extends Command
             'requisiciones-extemporaneas', // Subdirección Administrativa: autoriza las capturadas fuera del periodo
             'requisiciones-fecha', // Recursos Materiales / Control Presupuestal: cambia la fecha de cualquier requisición
             'requisiciones-cotizar', // Recursos Materiales: recibe la requisición, inicia y edita la cotización
+            'requisiciones-devolver', // Recursos Materiales regresa la requisición al área (p. ej. sin stock) para que la modifique
             'requisiciones-cancelar', // cancela cualquier requisición antes de la orden de compra
 
             // Órdenes de compra (Recursos Materiales)
@@ -46,8 +47,11 @@ class SyncPermissions extends Command
             'ordenes-compra-cancelar', // cancela la orden de compra (antes, su CLC); después sigue la requisición
 
             // Trámite de CLC: ver la bandeja y actuar como cada área (el pago es ordenes-compra-pagar).
+            // Almacén: ver bandeja e inventario, registrar entradas y salidas; RM asigna la orden de compra al almacén.
+            'almacen-index', 'almacen-entradas', 'almacen-salidas', 'ordenes-compra-almacen',
+            'facturas-index', // pestaña Facturas: CFDI cargados, validación en el SAT y su trámite
             'clc-index', 'clc-recursos-materiales', 'clc-control-presupuestal', 'clc-sindicatura', 'clc-egresos',
-            'clc-cancelar', // cancela la CLC en cualquier paso, aun pagada (primer paso de la cancelación escalonada)
+            'clc-cancelar', // cancela la CLC según el paso: el área hasta que la recibe RM, RM hasta que la recibe CP, CP hasta que la recibe Sindicatura (Admin siempre)
 
             // Modificaciones presupuestales
             'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar',

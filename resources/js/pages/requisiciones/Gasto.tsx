@@ -72,22 +72,22 @@ const columnas: { key: Columna; titulo: string; ayuda: string }[] = [
     {
         key: 'comprometido',
         titulo: 'Comprometido',
-        ayuda: 'Requisiciones con suficiencia que aún no tienen factura',
+        ayuda: 'Acumulado: todo lo comprometido con suficiencia (incluye lo ya devengado y pagado)',
     },
     {
         key: 'devengado',
         titulo: 'Devengado',
-        ayuda: 'Órdenes de compra con factura (XML) cargada, aún sin pago',
+        ayuda: 'Acumulado: todo el historial de facturas (XML) cargadas, incluye lo pagado',
     },
     {
         key: 'pagado',
         titulo: 'Pagado',
-        ayuda: 'Órdenes de compra con pago registrado',
+        ayuda: 'Todo el historial de pagos registrados',
     },
     {
         key: 'disponible',
         titulo: 'Disponible',
-        ayuda: 'Vigente − comprometido − devengado − pagado',
+        ayuda: 'Vigente − comprometido (acumulado)',
     },
     {
         key: 'saldo_corrido',

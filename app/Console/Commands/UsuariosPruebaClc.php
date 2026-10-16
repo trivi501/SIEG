@@ -38,25 +38,26 @@ class UsuariosPruebaClc extends Command
     public const ROLES = [
         'Área solicitante' => ['area', [
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-clc',
-            'modificaciones-index', 'modificaciones-create', 'clc-index',
+            'modificaciones-index', 'modificaciones-create', 'clc-index', 'clc-cancelar', 'facturas-index',
         ]],
         'Recursos Materiales' => ['recursos.materiales', [
-            'requisiciones-index', 'requisiciones-edit', 'requisiciones-cotizar', 'requisiciones-suficiencia', 'requisiciones-fecha', 'requisiciones-cancelar',
+            'requisiciones-index', 'requisiciones-edit', 'requisiciones-cotizar', 'requisiciones-devolver', 'requisiciones-suficiencia', 'requisiciones-fecha', 'requisiciones-cancelar',
             'recursos-materiales-index', 'ordenes-compra-create', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'ordenes-compra-cancelar', 'proveedores-index', 'proveedores-create', 'proveedores-edit',
-            'clc-index', 'clc-recursos-materiales',
+            'clc-index', 'clc-recursos-materiales', 'clc-cancelar', 'facturas-index', 'ordenes-compra-almacen', 'almacen-index',
         ]],
         'Control Presupuestal' => ['control.presupuestal', [
             // Requisiciones de todas las áreas (la cotización y la bandeja son de Recursos Materiales).
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-delete', 'requisiciones-suficiencia',
             'requisiciones-clc', 'requisiciones-extemporaneas', 'requisiciones-fecha', 'requisiciones-cancelar', 'ordenes-compra-fecha', 'ordenes-compra-verificar-sat', 'ordenes-compra-cancelar', 'clc-cancelar',
             'presupuesto-index', 'gasto-index', 'modificaciones-index', 'modificaciones-create', 'modificaciones-autorizar', 'auditoria-index',
-            'clc-index', 'clc-control-presupuestal',
+            'clc-index', 'clc-control-presupuestal', 'facturas-index', 'almacen-index',
             // Administra usuarios, roles y permisos.
             'users-index', 'users-create', 'users-edit', 'roles-index', 'roles-create', 'roles-edit', 'permisos-index',
             'catalogos-regidores-index', 'catalogos-regidores-create', 'catalogos-regidores-edit', 'catalogos-regidores-delete',
         ]],
-        'Sindicatura' => ['sindicatura', ['clc-index', 'clc-sindicatura']],
-        'Egresos' => ['egresos', ['clc-index', 'clc-egresos', 'ordenes-compra-pagar', 'ordenes-compra-verificar-sat']],
+        'Sindicatura' => ['sindicatura', ['clc-index', 'clc-sindicatura', 'facturas-index']],
+        'Egresos' => ['egresos', ['clc-index', 'clc-egresos', 'ordenes-compra-pagar', 'ordenes-compra-verificar-sat', 'facturas-index']],
+        'Almacén' => ['almacen', ['almacen-index', 'almacen-entradas', 'almacen-salidas']],
     ];
 
     public function handle(): int

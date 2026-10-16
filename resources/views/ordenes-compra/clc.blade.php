@@ -23,7 +23,6 @@
         table.detalle { width: 100%; border-collapse: collapse; margin-top: 6px; }
         table.detalle th { border: 1px solid #000; font-size: 7pt; font-weight: normal; padding: 1px 2px; text-align: center; vertical-align: middle; }
         table.detalle td { font-size: 7pt; padding: 2px; text-align: center; vertical-align: top; }
-        table.detalle td.izq { text-align: left; }
         table.detalle td.num { text-align: right; white-space: nowrap; }
         table.detalle tr.ultimo td { border-bottom: 1px solid #000; }
 
@@ -115,12 +114,7 @@
             <td style="width: 118px;"><img class="logo" src="{{ public_path('img/logo_guindo.png') }}" alt="Ayuntamiento de Guadalupe"></td>
             <td style="width: 12px;"><div class="separador"></div></td>
             <td class="titulo">Cuenta por liquidar certificada para el<br>registro del ejercicio presupuestario</td>
-            <td class="folio" style="width: 140px; vertical-align: bottom;">
-                @if($orden->clc_cancelada_at)
-                    <div style="color: #b91c1c; font-weight: bold; font-size: 11pt;">CANCELADA</div>
-                @endif
-                {{ $orden->clc_folio_completo }}
-            </td>
+            <td class="folio" style="width: 140px; vertical-align: bottom;">{{ $orden->clc_folio_completo }}</td>
         </tr>
     </table>
 
@@ -193,7 +187,7 @@
                     <td>{{ $r['fuente'] }}</td>
                     <td>{{ $r['proyecto'] }}</td>
                     <td>{{ $r['partida'] }}</td>
-                    <td class="izq">{{ mb_strtoupper($r['nombre'] ?? '') }}</td>
+                    <td>{{ mb_strtoupper($r['nombre'] ?? '') }}</td>
                     <td style="font-size: 6.2pt; white-space: nowrap;">{{ $orden->xml_uuid }}</td>
                     <td>{{ $orden->xml_fecha?->format('d/m/Y') }}</td>
                     <td class="num">{{ $n($r['subtotal']) }}</td>

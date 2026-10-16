@@ -31,7 +31,7 @@
         .sin-borde { border: none !important; }
         table.movimiento td.total { font-weight: bold; font-size: 8.5pt; text-align: right; padding-top: 3px; }
 
-        .firma { width: 320px; margin: 70px 40px 0 auto; text-align: center; font-size: 8.5pt; }
+        .firma { width: 320px; margin: 24px 40px 0 auto; text-align: center; font-size: 8.5pt; }
         .firma-linea { border-top: 1px solid #000; padding-top: 6px; line-height: 2; }
 
         .pie { position: fixed; bottom: -8mm; left: 0; right: 0; font-size: 7pt; font-weight: bold; }
@@ -139,6 +139,7 @@
     @endif
 
     <div class="firma">
+        <div style="margin-bottom: 52px;">Solicita:</div>
         <div class="firma-linea">
             {{ $firmante['nombre'] ?? '' }}<br>
             {{ mb_strtoupper($firmante['cargo'] ?? $unidad?->nombre ?? 'LA UNIDAD ADMINISTRATIVA') }}

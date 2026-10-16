@@ -155,10 +155,11 @@ class PresupuestoController extends Controller
             'CLAVE3' => 'required|string|max:50',
             'CLAVE6' => 'required|string|max:50',
             'PARTIDA' => 'required|string|max:200',
-            'IMPORTE_TOTAL' => 'required|numeric|min:0.01|max:9999999999999',
+            // Se puede dar de alta en 0 (la línea existe y recibe recursos después por modificaciones).
+            'IMPORTE_TOTAL' => 'required|numeric|min:0|max:9999999999999',
             ...array_fill_keys($meses, 'nullable|numeric|min:0|max:9999999999999'),
         ], [
-            'IMPORTE_TOTAL.min' => 'El importe total debe ser mayor a cero.',
+            'IMPORTE_TOTAL.min' => 'El importe total no puede ser negativo.',
         ], [
             'CLAVE' => 'secretaría o dirección', 'CLAVE3' => 'fuente de financiamiento',
             'CLAVE6' => 'proyecto', 'PARTIDA' => 'partida', 'IMPORTE_TOTAL' => 'importe total',

@@ -30,6 +30,8 @@ export default function SearchableSelect({
 }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
+    // Opción resaltada para elegir con el teclado (flechas + Enter).
+    const [activo, setActivo] = useState(0);
     const [pos, setPos] = useState({ left: 0, top: 0, width: 240 });
     // Inline (dentro de un Dialog con scroll): se abre hacia arriba si abajo no cabe la lista.
     const [haciaArriba, setHaciaArriba] = useState(false);
@@ -63,6 +65,7 @@ export default function SearchableSelect({
         const handleKey = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 setOpen(false);
+                btnRef.current?.focus();
             }
         };
 
@@ -117,12 +120,36 @@ export default function SearchableSelect({
         }
 
         setQuery('');
+        setActivo(0);
         setOpen((v) => !v);
     };
 
     const select = (v: string) => {
         onChange(v);
         setOpen(false);
+        btnRef.current?.focus();
+    };
+
+    // Con el botón enfocado: flechas o cualquier letra abren la búsqueda (la letra ya se escribe en ella).
+    const teclaEnBoton = (e: React.KeyboardEvent) => {
+        if (open || disabled) {
+            return;
+        }
+
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            toggle();
+        } else if (
+            e.key.length === 1 &&
+            e.key !== ' ' &&
+            !e.ctrlKey &&
+            !e.metaKey &&
+            !e.altKey
+        ) {
+            e.preventDefault();
+            toggle();
+            setQuery(e.key);
+        }
     };
 
     const selected = options.find((o) => o.value === value);
@@ -149,6 +176,7 @@ export default function SearchableSelect({
                 ref={btnRef}
                 disabled={disabled}
                 onClick={toggle}
+                onKeyDown={teclaEnBoton}
                 className="w-full truncate rounded border border-input bg-background px-2 py-1.5 text-left text-xs shadow-sm disabled:opacity-50"
             >
                 {selected ? (
@@ -169,8 +197,39 @@ export default function SearchableSelect({
                 >
                     <input
                         autoFocus
+                        // El cursor al final: la letra que abrió la búsqueda ya está escrita.
+                        onFocus={(e) =>
+                            e.target.setSelectionRange(
+                                e.target.value.length,
+                                e.target.value.length,
+                            )
+                        }
                         value={query}
-                        onChange={(e) => setQuery(e.target.value)}
+                        onChange={(e) => {
+                            setQuery(e.target.value);
+                            setActivo(0);
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setActivo((a) =>
+                                    Math.min(a + 1, filtered.length - 1),
+                                );
+                            } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setActivo((a) => Math.max(a - 1, 0));
+                            } else if (e.key === 'Enter') {
+                                // Enter elige la opción resaltada (no envía el formulario).
+                                e.preventDefault();
+
+                                if (filtered[activo]) {
+                                    select(filtered[activo].value);
+                                }
+                            } else if (e.key === 'Tab') {
+                                setOpen(false);
+                            }
+                        }}
+                        aria-label="Buscar"
                         placeholder="Buscar..."
                         className="w-full border-b border-input bg-transparent px-2 py-1.5 text-xs focus:outline-none"
                     />
@@ -182,13 +241,23 @@ export default function SearchableSelect({
                         >
                             ---
                         </button>
-                        {filtered.map((o) => (
+                        {filtered.map((o, i) => (
                             <button
                                 key={o.value}
+                                ref={
+                                    i === activo
+                                        ? (el) =>
+                                              el?.scrollIntoView({
+                                                  block: 'nearest',
+                                              })
+                                        : undefined
+                                }
                                 type="button"
+                                tabIndex={-1}
                                 onClick={() => select(o.value)}
+                                onMouseEnter={() => setActivo(i)}
                                 title={texto(o)}
-                                className="flex w-full items-start gap-2 border-b border-border/40 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                                className={`flex w-full items-start gap-2 border-b border-border/40 px-2 py-1.5 text-left text-xs hover:bg-muted ${i === activo ? 'bg-muted' : ''}`}
                             >
                                 <span className="min-w-0 flex-1 break-words">
                                     {texto(o)}

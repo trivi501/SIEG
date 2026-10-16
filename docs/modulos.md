@@ -23,15 +23,15 @@ Menú lateral: **Panel**, **Presupuesto**, **Ejercicio y control del gasto**, **
 | Aprobado | Importe aprobado (importado) |
 | Modificado | Suma de modificaciones presupuestales **autorizadas** (+ destino, − origen) |
 | Vigente | Aprobado ± modificado |
-| Comprometido | Requisiciones **con suficiencia** cuya orden de compra aún no tiene factura |
+| Comprometido | **Acumulado**: todas las requisiciones **con suficiencia** (incluye lo ya devengado y pagado) |
 | En trámite | Requisiciones cotizadas que aún no tienen suficiencia |
-| Devengado | Requisiciones cuya orden de compra ya tiene **factura XML** (bien o servicio recibido y facturado) y aún no se paga |
-| Pagado | Requisiciones cuya orden de compra ya tiene **pago registrado** |
-| Disponible | Vigente − comprometido − devengado − pagado |
+| Devengado | **Acumulado**: todo el historial de órdenes de compra con **factura XML** (incluye lo pagado) |
+| Pagado | Todo el historial de órdenes de compra con **pago registrado** |
+| Disponible | Vigente − comprometido (acumulado) |
 
 **Saldos mensuales y corrida de saldos.** Además del disponible anual, cada línea tiene un **disponible del mes** = saldo corrido + asignado del mes (calendario) ± modificaciones autorizadas en el mes − comprometido en el mes (por fecha de suficiencia). Cada mes se *corren los saldos* (de forma **manual**): lo que quedó disponible en el mes anterior se suma al mes actual como **saldo corrido** (si se excedió, se resta). Se guarda en `saldos_mensuales` sin tocar el calendario autorizado y queda congelado (un movimiento tardío de un mes ya corrido no cambia lo corrido). Enero empieza en cero. No se programa: se corre con el botón *Correr saldos* (permiso `presupuesto-correr-saldos`) o con el comando `presupuesto:correr-saldos`; mientras no se corre, el saldo corrido se calcula con los movimientos. Una sola corrida por mes (el comando la puede recalcular con `--forzar`).
 
-Cada importe está en **un solo momento**: al cargar la factura pasa de comprometido a devengado y al registrar el pago, de devengado a pagado (el disponible no cambia). En la validación de suficiencia, la columna *Comprometido* es todo lo ya ejercido de la línea. La lista de `/presupuesto` muestra por línea la **clave del proyecto** (con filtro) y los importes **aprobado, modificado, vigente, comprometido, devengado y pagado**.
+Los momentos son **acumulativos**: lo comprometido sigue en comprometido al cargar la factura (y suma al devengado) y al pagar (y suma al pagado); comprometido ≥ devengado ≥ pagado y el disponible solo descuenta el comprometido. Una orden o CLC cancelada sale de devengado / pagado. La lista de `/presupuesto` muestra por línea la **clave del proyecto** (con filtro) y los importes **aprobado, modificado, vigente, comprometido, devengado y pagado**.
 
 Las modificaciones se guardan por clave de línea (no por id), así que sobreviven a una re-importación del presupuesto.
 
@@ -69,13 +69,27 @@ flowchart TD
 
 Los estados 7 a 11 se agregaron al catálogo `cat_egreso_requisicion_estado` (migración `2026_10_12_100000`, que además pasó a su estado las requisiciones que ya tenían suficiencia y seguían "En cotización").
 
+**Regresar al área** (`requisiciones-devolver`, Recursos Materiales): en *En Recursos Materiales* o *En cotización* (sin suficiencia), con motivo — p. ej. un producto que no está en stock —; queda **No válida (4)** para que el área la modifique y la vuelva a enviar.
+
+**Almacén** (`/almacen`, `App\Services\Almacen`), conforme a la orden de compra:
+
+- Recursos Materiales **asigna** la orden de compra al almacén (*Asignar al almacén* en la requisición, `ordenes-compra-almacen`).
+- El almacén registra a mano sus **entradas** (lo que recibe del proveedor, por partes, hasta lo pedido; folio `EA-AÑO-0001`, `almacen-entradas`) y sus **salidas** al área de la requisición (por partes, hasta la existencia; folio `SA-AÑO-0001`, `almacen-salidas`). Cada movimiento queda en la bitácora de la requisición.
+- **Inventario** (`/almacen/inventario`): por concepto, recibido, entregado y existencia valuada al precio de la orden.
+- Formatos (lo de una orden cancelada no se imprime): **Acta de entrega** (por entrada, todas las órdenes: entrega el proveedor, recibe el usuario de Materiales que registró la entrada, con la fecha de la entrada); **Entrada de almacén** (recibe la receptora de insumos — rol *Elabora* — y autoriza el jefe de Recursos Materiales — *Autoriza* —, en Catálogos → Firmantes); **Salida de almacén** (logo, folio, secretaría, fecha, cantidad y descripción; firman quien entrega, el titular de Recursos Materiales y el titular del área que autorizó la requisición).
+- Rol de prueba **Almacén** (`almacen.prueba@sieg.test`).
+
+**Facturas** (`/facturas`, `facturas-index`): todas las facturas cargadas (también las canceladas con su orden) con emisor, folio/UUID, fecha, monto (ISR), validación en el SAT (y EFOS) y el estatus de su trámite: requisición (FUR), orden de compra y CLC. Filtros por texto, estado en el SAT, aceptadas/canceladas y fechas; paginada de 25. Quien participa en el trámite ve todas; el área, las de su secretaría.
+
+**Firmas de los formatos**: requisición (FUR) — Solicitante: enlace que la capturó; Autorizó: titular del área. Orden de compra — Solicita: Recursos Materiales; Autoriza: Administración. CLC — Solicitante: titular del área; Autoriza: Tesorería y Sindicatura. Modificación (traspaso) — Solicita: titular del área.
+
 **Cancelación escalonada** (en cualquier estado, de lo último a lo primero; cada paso con motivo obligatorio y bitácora):
 
-1. *Cancelar CLC* (`clc-cancelar`): en cualquier paso del trámite, aun pagada. Sale de las bandejas (estado de trámite **Cancelada**, filtro *Canceladas* en Seguimiento), el pago queda anulado (deja de contar como pagado; folio y número de transferencia se conservan como historial) y la requisición regresa a **9 Con factura**. No se genera otra CLC.
-2. *Cancelar orden de compra* (`ordenes-compra-cancelar`): solo con la CLC cancelada (o sin CLC). Deja de contar como devengado y la requisición regresa a **7 Comprometida**. No se carga factura ni se genera otra orden.
+1. *Cancelar CLC* (`clc-cancelar`), según el paso del trámite (`TramiteClc::CANCELA_HASTA`): el **área** (las de su unidad) hasta que Recursos Materiales la recibe; **Recursos Materiales** hasta que la recibe Control Presupuestal; **Control Presupuestal** hasta que llega a Sindicatura; después, aun pagada, solo **Admin**. Sale de las bandejas (estado de trámite **Cancelada**, filtro *Canceladas* en Seguimiento), el pago queda anulado (deja de contar como pagado; folio y número de transferencia se conservan como historial) y la requisición regresa a **9 Con factura**. No se genera otra CLC.
+2. *Cancelar orden de compra* (`ordenes-compra-cancelar`): solo con la CLC cancelada (o sin CLC). **Cancela también su factura**: el UUID pasa a `xml_uuid_cancelado` y esa misma factura se puede cargar **una sola vez más** en otra orden. Deja de contar como devengado y la requisición regresa a **7 Comprometida**.
 3. *Cancelar requisición*: con la orden cancelada (o sin orden). Es cuando el presupuesto se libera.
 
-La orden de compra cancelada ya no se imprime; el PDF de la CLC cancelada lleva la marca **CANCELADA**.
+Lo cancelado ya no se imprime: ni la CLC, ni la orden de compra, ni el formato de la requisición.
 
 **Cancelar requisición sin orden de compra**: botón *Cancelar requisición* (modal con motivo obligatorio). Con el permiso `requisiciones-cancelar` en cualquiera de esos estados; el enlace de la secretaría, las suyas pendientes o rechazadas. Queda en estado **12 Cancelada** con el motivo, quién y cuándo, y deja de contar en el presupuesto (en trámite o comprometido). En los saldos mensuales, lo que estaba comprometido se queda en el mes de la suficiencia y se **libera en el mes de la cancelación** (el mes vigente), no en el mes original.
 
