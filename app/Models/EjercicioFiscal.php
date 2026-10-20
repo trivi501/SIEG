@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\Auditable;
+use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Model;
 
@@ -45,11 +46,42 @@ class EjercicioFiscal extends Model
         ];
     }
 
-    /** ¿La fecha (hora de México) cae en el periodo ordinario de captura de su ejercicio? */
+    /**
+     * Periodo de captura del mes de la fecha: el del calendario (Catálogos → Calendario de captura) o, si
+     * ese mes no está registrado, los días del ejercicio (por omisión, del 1 al 7).
+     *
+     * @return array{inicio: Carbon, fin: Carbon, calendario: bool}
+     */
+    public static function periodoDelMes(CarbonInterface $fecha): array
+    {
+        $mes = CalendarioCaptura::where('año', $fecha->year)->where('mes', $fecha->month)->where('activo', true)->first();
+        if ($mes) {
+            return ['inicio' => $mes->fecha_inicio->copy()->startOfDay(), 'fin' => $mes->fecha_fin->copy()->startOfDay(), 'calendario' => true];
+        }
+
+        [$inicio, $fin] = static::periodoCaptura($fecha->year);
+        $base = Carbon::create($fecha->year, $fecha->month, 1);
+
+        return [
+            'inicio' => $base->copy()->day(min($inicio, $base->daysInMonth)),
+            'fin' => $base->copy()->day(min($fin, $base->daysInMonth)),
+            'calendario' => false,
+        ];
+    }
+
+    /**
+     * ¿La fecha (hora de México) cae en un periodo de captura? Cuenta cualquier periodo del calendario que
+     * la incluya (el de noviembre puede empezar a fines de octubre) y, si no, el periodo de su mes.
+     */
     public static function enPeriodoDeCaptura(CarbonInterface $fecha): bool
     {
-        [$inicio, $fin] = static::periodoCaptura($fecha->year);
+        $dia = $fecha->toDateString();
+        if (CalendarioCaptura::where('activo', true)->whereDate('fecha_inicio', '<=', $dia)->whereDate('fecha_fin', '>=', $dia)->exists()) {
+            return true;
+        }
 
-        return $fecha->day >= $inicio && $fecha->day <= $fin;
+        $periodo = static::periodoDelMes($fecha);
+
+        return $dia >= $periodo['inicio']->toDateString() && $dia <= $periodo['fin']->toDateString();
     }
 }

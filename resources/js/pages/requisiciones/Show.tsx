@@ -26,7 +26,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { fecha, fechaLocal, money, numero } from '@/lib/presupuesto';
+import { fecha, fechaLocal, money, numero, precio } from '@/lib/presupuesto';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -168,6 +168,7 @@ type Accion =
     | 'clc'
     | 'cancelar'
     | 'devolver'
+    | 'refacturar'
     | 'cancelar_clc'
     | 'cancelar_orden';
 
@@ -185,6 +186,7 @@ export default function Show({
     motivoNoCancelarClc,
     puedeCancelarOrden,
     estadosClc,
+    mantenimiento,
     proveedores,
     modificaciones,
 }: {
@@ -193,7 +195,7 @@ export default function Show({
     nombresPresupuesto: NombresPresupuesto;
     validacion: Validacion;
     puedeEditarse: boolean;
-    periodoCaptura: [number, number];
+    periodoCaptura: [string, string];
     puedeCambiarFecha: boolean;
     puedeCambiarFechaOrden: boolean;
     puedeCancelar: boolean;
@@ -201,6 +203,12 @@ export default function Show({
     motivoNoCancelarClc: string | null;
     puedeCancelarOrden: boolean;
     estadosClc: Record<string, string>;
+    mantenimiento: {
+        folio: string;
+        vehiculo: string;
+        area: string | null;
+        estado: string;
+    } | null;
     proveedores: {
         id: number;
         nombre: string;
@@ -410,6 +418,25 @@ export default function Show({
             ejecutar: (motivo, op) =>
                 router.post(`/requisiciones/${id}/rechazar`, { motivo }, op),
         },
+        refacturar: {
+            titulo: `Refacturar ${orden?.folio_completo ?? ''}`,
+            descripcion: `El proveedor volvió a facturar: se quita la factura actual (queda en el historial)${orden?.clc_folio_completo && !orden?.clc_cancelada_at ? ` y se cancela la CLC ${orden.clc_folio_completo}` : ''}. Al cargar el nuevo XML se genera una CLC nueva.`,
+            tono: 'aviso',
+            textoConfirmar: 'Refacturar',
+            a: 'Orden de Compra (sin factura)',
+            motivo: {
+                etiqueta: 'Motivo de la refactura',
+                requerido: true,
+                minimo: 5,
+                placeholder: 'Por qué el proveedor volvió a facturar…',
+            },
+            ejecutar: (motivo, op) =>
+                router.post(
+                    `/ordenes-compra/${orden?.id}/refacturar`,
+                    { motivo },
+                    op,
+                ),
+        },
         devolver: {
             titulo: 'Regresar al área',
             descripcion:
@@ -471,7 +498,7 @@ export default function Show({
         },
         extemporanea: {
             titulo: 'Autorizar requisición extemporánea',
-            descripcion: `Se capturó fuera del periodo ordinario de captura (del ${periodoCaptura[0]} al ${periodoCaptura[1]} de cada mes). Quedará registrado quién la autorizó y cuándo, y se envía sola a revisión.`,
+            descripcion: `Se capturó fuera del periodo ordinario de captura (del ${periodoCaptura[0]} al ${periodoCaptura[1]}). Quedará registrado quién la autorizó y cuándo, y se envía sola a revisión.`,
             tono: 'aviso',
             textoConfirmar: 'Autorizar y enviar a revisión',
             a: 'En revisión',
@@ -611,6 +638,16 @@ export default function Show({
                 </div>
 
                 <div className="grid max-w-5xl gap-6">
+                    {mantenimiento && (
+                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                            <strong>
+                                Mantenimiento vehicular {mantenimiento.folio}
+                            </strong>{' '}
+                            ({mantenimiento.estado}): {mantenimiento.vehiculo}
+                            {mantenimiento.area &&
+                                ` · Área: ${mantenimiento.area}`}
+                        </div>
+                    )}
                     {requisicion.cancelada_at && (
                         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-900">
                             <p className="flex items-center gap-2 font-semibold">
@@ -839,7 +876,7 @@ export default function Show({
                                                         {precios && (
                                                             <td className="p-2 text-center text-xs">
                                                                 {d.precio_unitario
-                                                                    ? money(
+                                                                    ? precio(
                                                                           d.precio_unitario,
                                                                       )
                                                                     : '—'}
@@ -1124,6 +1161,25 @@ export default function Show({
                                                 Asignada al almacén
                                             </Badge>
                                         ))}
+                                    {/* Refactura (Admin): el proveedor volvió a facturar; una CLC pagada no se refactura. */}
+                                    {puede('ordenes-compra-refacturar') &&
+                                        orden.xml_uuid &&
+                                        !orden.cancelada_at &&
+                                        !(
+                                            orden.pago_fecha &&
+                                            !orden.clc_cancelada_at
+                                        ) && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                                                onClick={() =>
+                                                    setAccion('refacturar')
+                                                }
+                                            >
+                                                Refacturar
+                                            </Button>
+                                        )}
                                     {/* Cancelada ya no se imprime. */}
                                     {!orden.cancelada_at && (
                                         <Button
@@ -1395,6 +1451,35 @@ export default function Show({
                                     </div>
                                 )}
 
+                                {(orden.refacturas ?? []).length > 0 && (
+                                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                                        <p className="mb-1 font-semibold">
+                                            Refacturas (
+                                            {orden.refacturas.length})
+                                        </p>
+                                        <ul className="space-y-1">
+                                            {orden.refacturas.map((r: any) => (
+                                                <li key={r.id}>
+                                                    {fechaLocal(r.created_at)} ·{' '}
+                                                    {r.usuario?.name ?? '—'}:
+                                                    factura{' '}
+                                                    {r.xml_folio_anterior ?? ''}{' '}
+                                                    <span className="font-mono">
+                                                        {r.xml_uuid_anterior}
+                                                    </span>
+                                                    {r.clc_folio_anterior &&
+                                                        ` · CLC ${r.clc_folio_anterior} cancelada`}
+                                                    {r.clc_nueva
+                                                        ? ` → nueva CLC ${r.clc_nueva}`
+                                                        : r.clc_folio_anterior
+                                                          ? ' → la CLC nueva se genera al cargar el XML'
+                                                          : ''}
+                                                    . Motivo: {r.motivo}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
                                 {!orden.xml_uuid &&
                                     !orden.cancelada_at &&
                                     puede('ordenes-compra-create') && (

@@ -3,6 +3,7 @@
 namespace App\Catalogos;
 
 use App\Models\Banco;
+use App\Models\CalendarioCaptura;
 use App\Models\Departamento;
 use App\Models\EgresoFuenteFinanciamiento;
 use App\Models\EgresoObjetoGasto;
@@ -229,7 +230,7 @@ final class Catalogos
                     Campo::seleccion('estado', 'Estado', ['abierto' => 'Abierto', 'cerrado' => 'Cerrado'])->requerido()->porDefecto('abierto'),
                     Campo::entero('captura_dia_inicio', 'Captura de requisiciones: del día')->requerido()->min(1)->max(31)->porDefecto(EjercicioFiscal::CAPTURA_DIA_INICIO),
                     Campo::entero('captura_dia_fin', 'Captura de requisiciones: al día')->requerido()->min(1)->max(31)->porDefecto(EjercicioFiscal::CAPTURA_DIA_FIN)
-                        ->ayuda('Fuera de estos días, la requisición queda extemporánea y necesita autorización de la Subdirección Administrativa.'),
+                        ->ayuda('Solo para los meses sin registro en el Calendario de captura de requisiciones. Fuera del periodo, la requisición queda extemporánea.'),
                     Campo::activo(),
                 ],
                 buscar: ['año', 'descripcion'],
@@ -241,6 +242,37 @@ final class Catalogos
                     }
 
                     return [];
+                },
+            ),
+            new Catalogo(
+                slug: 'calendario-captura',
+                titulo: 'Calendario de captura de requisiciones',
+                singular: 'periodo de captura',
+                grupo: 'Ejercicios y documentos',
+                descripcion: 'Inicio y fin del periodo de captura de requisiciones de cada mes. Fuera de él la requisición queda extemporánea (necesita autorización de la Subdirección Administrativa). Un mes sin registrar usa los días del ejercicio fiscal.',
+                modelo: CalendarioCaptura::class,
+                campos: [
+                    Campo::entero('año', 'Año')->requerido()->min(2000)->max(2100)->porDefecto(fn () => (int) date('Y')),
+                    Campo::seleccion('mes', 'Mes', CalendarioCaptura::MESES)->requerido()->porDefecto(fn () => (string) now('America/Mexico_City')->month),
+                    Campo::fecha('fecha_inicio', 'Inicio de captura')->requerido(),
+                    Campo::fecha('fecha_fin', 'Fin de captura')->requerido()
+                        ->ayuda('Inclusive: ese día todavía se captura en tiempo.'),
+                    Campo::activo(),
+                ],
+                buscar: ['año'],
+                llave: ['año', 'mes'],
+                orden: ['año' => 'desc', 'mes' => 'asc'],
+                validar: function (array $datos, $registro = null) {
+                    $errores = [];
+                    if (! empty($datos['fecha_inicio']) && ! empty($datos['fecha_fin']) && $datos['fecha_inicio'] > $datos['fecha_fin']) {
+                        $errores['fecha_fin'] = 'El fin de captura no puede ser anterior al inicio.';
+                    }
+                    if (isset($datos['año'], $datos['mes']) && CalendarioCaptura::where('año', $datos['año'])->where('mes', $datos['mes'])
+                        ->when($registro, fn ($q) => $q->whereKeyNot($registro->getKey()))->exists()) {
+                        $errores['mes'] = 'Ese mes ya tiene su periodo de captura; edítalo.';
+                    }
+
+                    return $errores;
                 },
             ),
             new Catalogo(
@@ -372,7 +404,7 @@ final class Catalogos
                 titulo: 'Padrón vehicular',
                 singular: 'vehículo',
                 grupo: 'Padrón vehicular',
-                descripcion: 'Los cambios de resguardante y de secretaría quedan en el historial de cada vehículo.',
+                descripcion: 'Cada vehículo es resguardo de una secretaría y está asignado a un área (departamento) de ella. Sus requisiciones de mantenimiento van a nombre de la secretaría de resguardo. Los cambios quedan en el historial de cada vehículo.',
                 modelo: Vehiculo::class,
                 campos: [
                     Campo::texto('numero_economico', 'Número económico')->requerido()->max(20)->unico()->mayusculas(),
@@ -383,7 +415,10 @@ final class Catalogos
                     Campo::entero('modelo', 'Modelo (año)')->min(1950)->max(2100),
                     Campo::texto('color', 'Color')->max(40)->mayusculas()->oculto(),
                     Campo::texto('tipo', 'Tipo')->max(40)->mayusculas()->oculto(),
-                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Secretaría o dirección', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave'),
+                    Campo::relacion('id_cat_egreso_unidad_administrativa', 'Secretaría (resguardo)', EgresoUnidadAdministrativa::class, ['clave', 'nombre'], 'clave')
+                        ->ayuda('Necesaria para recibirlo en el taller: su requisición va a nombre de esta secretaría.'),
+                    Campo::relacion('departamento_id', 'Área asignada', Departamento::class, ['nombre'])
+                        ->ayuda('Departamento de la secretaría de resguardo al que está asignado.'),
                     Campo::texto('resguardante', 'Resguardante')->max(200)->mayusculas(),
                     Campo::texto('cargo_resguardante', 'Cargo del resguardante')->max(200)->oculto(),
                     Campo::texto('numero_resguardo', 'Número de resguardo')->max(40)->oculto(),
@@ -395,6 +430,15 @@ final class Catalogos
                 buscar: ['numero_economico', 'placas', 'serie', 'marca', 'resguardante'],
                 llave: ['numero_economico'],
                 orden: ['numero_economico' => 'asc'],
+                validar: function (array $datos) {
+                    // El área asignada debe ser de la secretaría de resguardo.
+                    if (! empty($datos['departamento_id']) && ! empty($datos['id_cat_egreso_unidad_administrativa'])
+                        && (int) Departamento::whereKey($datos['departamento_id'])->value('id_cat_egreso_unidad_administrativa') !== (int) $datos['id_cat_egreso_unidad_administrativa']) {
+                        return ['departamento_id' => 'El área asignada no pertenece a la secretaría de resguardo.'];
+                    }
+
+                    return [];
+                },
             ),
         ];
     }

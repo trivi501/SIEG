@@ -30,7 +30,7 @@ class UsuariosPruebaClc extends Command
      * los proveedores, solo del rol Recursos Materiales (Admin siempre tiene todo).
      */
     private const SOLO_ADMIN_Y_CONTROL = [
-        'presupuesto-index', 'gasto-index', 'modificaciones-autorizar',
+        'modificaciones-autorizar',
         'recursos-materiales-index', 'proveedores-index', 'proveedores-create', 'proveedores-edit', 'proveedores-delete', 'proveedores-import',
     ];
 
@@ -39,6 +39,7 @@ class UsuariosPruebaClc extends Command
         'Área solicitante' => ['area', [
             'requisiciones-index', 'requisiciones-create', 'requisiciones-edit', 'requisiciones-clc',
             'modificaciones-index', 'modificaciones-create', 'clc-index', 'clc-cancelar', 'facturas-index',
+            'presupuesto-index', 'gasto-index', // solo consulta, de las partidas de su unidad
         ]],
         'Recursos Materiales' => ['recursos.materiales', [
             'requisiciones-index', 'requisiciones-edit', 'requisiciones-cotizar', 'requisiciones-devolver', 'requisiciones-suficiencia', 'requisiciones-fecha', 'requisiciones-cancelar',
@@ -58,6 +59,7 @@ class UsuariosPruebaClc extends Command
         'Sindicatura' => ['sindicatura', ['clc-index', 'clc-sindicatura', 'facturas-index']],
         'Egresos' => ['egresos', ['clc-index', 'clc-egresos', 'ordenes-compra-pagar', 'ordenes-compra-verificar-sat', 'facturas-index']],
         'Almacén' => ['almacen', ['almacen-index', 'almacen-entradas', 'almacen-salidas']],
+        'Taller vehicular' => ['taller', ['vehiculos-mantenimiento', 'requisiciones-index', 'requisiciones-create', 'catalogos-vehiculos-index']],
     ];
 
     public function handle(): int

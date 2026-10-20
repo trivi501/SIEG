@@ -15,6 +15,9 @@ La base se creó el 8 de octubre de 2026 copiando de la base de SIEMG (`laravel`
 | `tb_egreso_requisicion_bitacora` | Bitácora de cambios de cada requisición |
 | `cat_egreso_requisicion_estado` | 1 Pendiente, 2 En Revisión, 3 Aprobada, 4 Rechazada, 5 En Recursos Materiales, 6 En Cotización |
 | `proveedores` | Catálogo de proveedores con su cuenta bancaria (`id_cat_banco`, `clabe`, `cuenta_bancaria`) y `vigencia` en el padrón (vencida no recibe orden de compra; vacía no vence); `tb_egreso_proveedor` legado no se usa |
+| `ordenes_compra_refacturas` | Historial de refacturas: factura (UUID, folio, total, XML) y CLC anteriores, CLC nueva, motivo y usuario |
+| `vehiculo_mantenimientos` | Recepciones de vehículos en el taller (folio MV-AÑO-0001), secretaría de resguardo y área al recibirlo, falla/servicio, entrega y su requisición (`id_tb_egreso_requisicion`); `vehiculos.departamento_id` = área asignada |
+| `calendario_captura` | Periodo de captura de requisiciones por mes (`año`, `mes`, `fecha_inicio`, `fecha_fin`); fuera de él, extemporánea |
 | `almacen_entradas` / `almacen_entrada_detalles` | Entradas de almacén por orden de compra (folio EA-AÑO-0001) y lo recibido de cada concepto de la requisición (`id_tb_egreso_requisicion_detalle`) |
 | `almacen_salidas` / `almacen_salida_detalles` | Salidas de almacén al área (folio SA-AÑO-0001, `recibe`) y lo entregado de cada concepto |
 | `ordenes_compra` | Orden de compra por requisición, datos de su CFDI, CLC y pago (`transferencia_numero` TRF-AÑO-0001, consecutivo por año, único; `xml_uuid_cancelado` factura cancelada con su orden (se puede cargar una vez más); `xml_isr` ISR retenido del CFDI (se paga importe − ISR); `sat_estado` Vigente/Cancelado/No Encontrado, `sat_estatus_cancelacion`, `sat_efos`, `sat_verificado_at`; cancelación escalonada: `clc_cancelada_at`, `clc_cancelada_user_id`, `clc_motivo_cancelacion`, `cancelada_at`, `cancelada_user_id`, `motivo_cancelacion`) |

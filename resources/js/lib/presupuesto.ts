@@ -33,6 +33,15 @@ const formatoNumero = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2,
 });
 
+const formatoPrecio = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+});
+
+/** Precio unitario de la cotización: hasta 4 decimales ($1,234.5678; $10.50). */
+export const precio = (n: number | string | null | undefined) =>
+    '$' + formatoPrecio.format(Number(n ?? 0));
+
 export const numero = (n: number | string | null | undefined) =>
     formatoNumero.format(Number(n ?? 0));
 

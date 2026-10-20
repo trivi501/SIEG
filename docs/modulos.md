@@ -29,6 +29,8 @@ Menú lateral: **Panel**, **Presupuesto**, **Ejercicio y control del gasto**, **
 | Pagado | Todo el historial de órdenes de compra con **pago registrado** |
 | Disponible | Vigente − comprometido (acumulado) |
 
+**Consulta por área**: con `presupuesto-index`, cada área ve solo las líneas de su unidad y en solo lectura (sin *Importar*, *Nueva partida*, *Editar* ni *Limpiar todo*, que dependen de `presupuesto-import`, `-create`, `-edit` y `-delete`); Admin y Control Presupuestal ven todo. Igual en *Ejercicio y control del gasto* (`gasto-index`): el área ve solo las partidas de su unidad, su detalle y su Excel, sin *Correr saldos*. La lista muestra el **vigente anual** y el **vigente al mes de la consulta** (aprobado de enero a ese mes ± modificaciones autorizadas hasta ese mes).
+
 **Saldos mensuales y corrida de saldos.** Además del disponible anual, cada línea tiene un **disponible del mes** = saldo corrido + asignado del mes (calendario) ± modificaciones autorizadas en el mes − comprometido en el mes (por fecha de suficiencia). Cada mes se *corren los saldos* (de forma **manual**): lo que quedó disponible en el mes anterior se suma al mes actual como **saldo corrido** (si se excedió, se resta). Se guarda en `saldos_mensuales` sin tocar el calendario autorizado y queda congelado (un movimiento tardío de un mes ya corrido no cambia lo corrido). Enero empieza en cero. No se programa: se corre con el botón *Correr saldos* (permiso `presupuesto-correr-saldos`) o con el comando `presupuesto:correr-saldos`; mientras no se corre, el saldo corrido se calcula con los movimientos. Una sola corrida por mes (el comando la puede recalcular con `--forzar`).
 
 Los momentos son **acumulativos**: lo comprometido sigue en comprometido al cargar la factura (y suma al devengado) y al pagar (y suma al pagado); comprometido ≥ devengado ≥ pagado y el disponible solo descuenta el comprometido. Una orden o CLC cancelada sale de devengado / pagado. La lista de `/presupuesto` muestra por línea la **clave del proyecto** (con filtro) y los importes **aprobado, modificado, vigente, comprometido, devengado y pagado**.
@@ -45,7 +47,7 @@ Al hacer clic en una partida se abre su **detalle** (`/requisiciones/gasto/detal
 
 - Captura: fecha de trámite, unidad administrativa, concepto y renglones con **Partida / Proyecto / Fuente** (tres columnas encadenadas: cada una solo ofrece valores que combinan con lo ya elegido y que tienen disponible), cantidad y descripción. Al guardar se valida que cada renglón exista en el presupuesto de la unidad.
 - Folio: prefijo de la secretaría o dirección + consecutivo anual (`REQ-0001` si no tiene prefijo).
-- **Calendario de captura**: el periodo ordinario es del día 1 al 7 de cada mes, configurable por ejercicio en `/catalogos/ejercicios` (*Captura de requisiciones: del día / al día*). La pantalla de captura avisa si el periodo está abierto. Lo que se captura fuera del periodo queda **extemporáneo**: no se puede *Enviar a revisión* hasta que la Subdirección Administrativa (Adquisiciones, permiso `requisiciones-extemporaneas`) pulsa *Autorizar extemporánea*; al autorizarla se envía sola a revisión; se guarda quién y cuándo (`extemporanea_user_id`, `extemporanea_autorizada_at`) y queda en la bitácora. La lista marca *Extemporánea por autorizar / autorizada*.
+- **Calendario de captura** (`/catalogos/calendario-captura`, menú *Requisiciones → Calendario de captura*, permisos `catalogos-calendario-captura-*`, Admin): el Admin define para **cada mes** la **fecha de inicio y la de fin** de la captura (`calendario_captura`, un registro por año y mes; el de un mes puede empezar a fines del anterior). Un mes sin registro usa los días del ejercicio (`/catalogos/ejercicios`, *Captura de requisiciones: del día / al día*; por omisión del 1 al 7). La pantalla de captura avisa si el periodo está abierto, con sus fechas (`EjercicioFiscal::periodoDelMes()` / `enPeriodoDeCaptura()`). Lo que se captura fuera del periodo queda **extemporáneo**: no se puede *Enviar a revisión* hasta que la Subdirección Administrativa (Adquisiciones, permiso `requisiciones-extemporaneas`) pulsa *Autorizar extemporánea*; al autorizarla se envía sola a revisión; se guarda quién y cuándo (`extemporanea_user_id`, `extemporanea_autorizada_at`) y queda en la bitácora. La lista marca *Extemporánea por autorizar / autorizada*.
 - El monto total siempre es la suma de los conceptos.
 
 ```mermaid
@@ -69,7 +71,14 @@ flowchart TD
 
 Los estados 7 a 11 se agregaron al catálogo `cat_egreso_requisicion_estado` (migración `2026_10_12_100000`, que además pasó a su estado las requisiciones que ya tenían suficiencia y seguían "En cotización").
 
+**Refactura** (`ordenes-compra-refacturar`, Admin): cuando el proveedor vuelve a facturar, el botón *Refacturar* de la orden de compra (con motivo) quita la factura vigente y la guarda en el historial (`ordenes_compra_refacturas`), cancela su CLC si la tenía (movimiento *cancelar* en el trámite) y la requisición regresa a *Orden de compra*. Al cargar el nuevo XML se **genera sola una CLC nueva** con otro folio (los folios sustituidos no se repiten). Una CLC ya pagada no se refactura.
+
 **Regresar al área** (`requisiciones-devolver`, Recursos Materiales): en *En Recursos Materiales* o *En cotización* (sin suficiencia), con motivo — p. ej. un producto que no está en stock —; queda **No válida (4)** para que el área la modifique y la vuelva a enviar.
+
+**Vehículos** (menú *Vehículos*):
+
+- **Padrón vehicular** (`/catalogos/vehiculos`): cada vehículo es **resguardo de una secretaría** y está **asignado a un área** (departamento) de ella; el área debe ser de esa secretaría.
+- **Mantenimiento** (`/vehiculos/mantenimientos`, `vehiculos-mantenimiento`, rol de prueba *Taller vehicular*): se **recibe** el vehículo en el taller (folio `MV-AÑO-0001`, fecha, kilometraje, preventivo/correctivo, falla o servicio, quién lo trae) y queda *En taller*. Desde ahí, *Requisición* abre la captura **a nombre de la secretaría de resguardo** (aunque el taller sea de otra unidad), con el concepto prellenado; la requisición queda ligada al mantenimiento y sigue el trámite normal (el taller la puede consultar). Al terminar se **entrega** (fecha, quién lo recibe, trabajo realizado) y el vehículo vuelve a *En servicio*.
 
 **Almacén** (`/almacen`, `App\Services\Almacen`), conforme a la orden de compra:
 

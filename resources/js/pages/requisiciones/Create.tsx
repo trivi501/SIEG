@@ -34,16 +34,29 @@ export default function Create({
     catalogs,
     unidadDefault,
     periodoCaptura,
+    mantenimiento,
 }: {
     catalogs: Catalogs;
     unidadDefault?: number | null;
-    periodoCaptura: { inicio: number; fin: number; abierto: boolean };
+    /** Requisición de un mantenimiento vehicular: va a nombre de la secretaría de resguardo. */
+    mantenimiento?: {
+        id: number;
+        folio: string;
+        vehiculo: string;
+        area: string | null;
+        tipo: string;
+        descripcion: string;
+    } | null;
+    periodoCaptura: { inicio: string; fin: string; abierto: boolean };
 }) {
     const conceptoRef = useRef<HTMLTextAreaElement>(null);
     const { data, setData, post, processing, errors, setError, clearErrors } =
         useForm({
             id_cat_egreso_unidad_administrativa: String(unidadDefault ?? ''),
-            concepto: '',
+            concepto: mantenimiento
+                ? `MANTENIMIENTO ${mantenimiento.tipo.toUpperCase()} DEL VEHÍCULO ${mantenimiento.vehiculo}${mantenimiento.area ? ` (${mantenimiento.area})` : ''}: ${mantenimiento.descripcion.toUpperCase()}`
+                : '',
+            mantenimiento_id: mantenimiento?.id ?? null,
             fecha_tramite: new Date().toISOString().slice(0, 10),
             incluye_iva: false,
             filas: [
@@ -141,10 +154,18 @@ export default function Create({
                     <h3 className="text-lg font-medium">Nueva Requisición</h3>
                 </div>
 
+                {mantenimiento && (
+                    <p className="mb-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                        <strong>Mantenimiento {mantenimiento.folio}:</strong>{' '}
+                        {mantenimiento.vehiculo}. La requisición va a nombre de
+                        la secretaría de resguardo del vehículo y sigue el
+                        trámite normal.
+                    </p>
+                )}
                 {periodoCaptura.abierto ? (
                     <p className="mb-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
                         Periodo de captura abierto: del {periodoCaptura.inicio}{' '}
-                        al {periodoCaptura.fin} de cada mes.
+                        al {periodoCaptura.fin}.
                     </p>
                 ) : (
                     <p
@@ -152,11 +173,10 @@ export default function Create({
                         className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
                     >
                         <strong>Fuera del periodo de captura</strong> (del{' '}
-                        {periodoCaptura.inicio} al {periodoCaptura.fin} de cada
-                        mes). La requisición quedará como{' '}
-                        <strong>extemporánea</strong> y pasará a revisión en
-                        cuanto la autorice la Subdirección Administrativa
-                        (Adquisiciones).
+                        {periodoCaptura.inicio} al {periodoCaptura.fin}). La
+                        requisición quedará como <strong>extemporánea</strong> y
+                        pasará a revisión en cuanto la autorice la Subdirección
+                        Administrativa (Adquisiciones).
                     </p>
                 )}
                 <form onSubmit={submit} className="w-full space-y-4">

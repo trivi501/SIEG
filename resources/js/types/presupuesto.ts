@@ -28,6 +28,8 @@ export interface PresupuestoEgreso {
     /** Momentos del gasto de la línea (lista del presupuesto). */
     modificado?: number;
     vigente?: number;
+    /** Vigente al mes de la consulta: aprobado de enero a ese mes ± modificaciones hasta ese mes. */
+    vigente_mes?: number;
     comprometido?: number;
     devengado?: number;
     pagado?: number;

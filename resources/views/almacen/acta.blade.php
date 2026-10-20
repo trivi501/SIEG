@@ -11,6 +11,8 @@
         $req = $orden->requisicion;
         $fecha = \Carbon\Carbon::parse($documento->fecha)->locale('es');
         $cantidad = fn ($c) => fmod((float) $c, 1) == 0 ? number_format((float) $c, 0) : number_format((float) $c, 2);
+        // Precio unitario de la cotización: hasta 4 decimales (al menos 2).
+        $precio = fn ($v) => preg_replace('/(\.\d{2}\d*?)0+$/', '$1', number_format((float) $v, 4));
         $total = $documento->detalles->sum(fn ($d) => (float) $d->cantidad * (float) $d->precio_unitario);
         // Recibe por parte de Recursos Materiales: el usuario que registró la entrada.
         $recibe = $documento->usuario;
@@ -49,7 +51,7 @@
                 <tr class="{{ $loop->last ? 'ultimo' : '' }}">
                     <td class="centro">{{ $cantidad($d->cantidad) }}</td>
                     <td>{{ mb_strtoupper($d->descripcion) }}</td>
-                    <td class="num">{{ number_format((float) $d->precio_unitario, 2) }}</td>
+                    <td class="num">{{ $precio($d->precio_unitario) }}</td>
                     <td class="num">{{ number_format((float) $d->cantidad * (float) $d->precio_unitario, 2) }}</td>
                 </tr>
             @endforeach

@@ -335,14 +335,20 @@ export default function Edit({
                                                             fila.precio_unitario
                                                         }
                                                         onChange={(e) =>
+                                                            // Solo números con hasta 4 decimales.
+                                                            /^\d*(\.\d{0,4})?$/.test(
+                                                                e.target.value,
+                                                            ) &&
                                                             actualizarFila(
                                                                 i,
                                                                 'precio_unitario',
                                                                 e.target.value,
                                                             )
                                                         }
+                                                        inputMode="decimal"
                                                         className="w-full rounded border-input px-2 py-1.5 text-center text-xs shadow-sm"
-                                                        placeholder="0.00"
+                                                        placeholder="0.0000"
+                                                        title="Hasta 4 decimales"
                                                     />
                                                     <label className="mt-1 flex items-center justify-center gap-1 text-xs">
                                                         <input

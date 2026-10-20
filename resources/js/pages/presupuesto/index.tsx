@@ -101,14 +101,21 @@ export default function Presupuesto({
     presupuestos,
     filters,
     totalDescuadradas,
+    mesActual,
 }: {
     presupuestos: Paginated;
     filters: Record<string, string>;
     totalDescuadradas: number;
+    mesActual: string;
 }) {
     const { props } = usePage<{ flash?: { success?: string; error?: string }; userPermissions?: string[] }>();
     const flash = props.flash;
-    const puedeCrear = (props.userPermissions ?? []).includes('presupuesto-create');
+    // Las áreas solo consultan: sin permisos de alta, edición, importación ni borrado no ven esos botones.
+    const permisos = props.userPermissions ?? [];
+    const puedeCrear = permisos.includes('presupuesto-create');
+    const puedeEditar = permisos.includes('presupuesto-edit');
+    const puedeImportar = permisos.includes('presupuesto-import');
+    const puedeBorrar = permisos.includes('presupuesto-delete');
     const [search, setSearch] = useState<Record<string, string>>(filters ?? {});
 
     const submitSearch = useCallback(() => {
@@ -157,6 +164,7 @@ empty[k] = '';
                         {flash.error}
                     </div>
                 )}
+                {puedeImportar && (
                 <div className="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
                     <h2 className="mb-4 text-xl font-semibold">Importar Presupuesto de Egresos {new Date().getFullYear()}</h2>
                     <Form action={importMethod()} className="flex items-end gap-4" encType="multipart/form-data">
@@ -182,13 +190,14 @@ empty[k] = '';
                         )}
                     </Form>
                 </div>
+                )}
 
                 <div className="rounded-xl border border-sidebar-border/70 dark:border-sidebar-border">
                     <div className="overflow-x-auto p-4">
                         <div className="mb-4 flex items-center justify-between">
                             <h3 className="text-lg font-semibold">Registros ({presupuestos.total})</h3>
                             <div className="flex items-center gap-2">
-                                {(totalDescuadradas > 0 || search.descuadradas) && (
+                                {puedeEditar && (totalDescuadradas > 0 || search.descuadradas) && (
                                     <label className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                                         <input
                                             type="checkbox"
@@ -210,7 +219,7 @@ empty[k] = '';
                                         <X className="mr-1 h-4 w-4" /> Limpiar
                                     </Button>
                                 )}
-                                {presupuestos.total > 0 && (
+                                {puedeBorrar && presupuestos.total > 0 && (
                                     <Dialog>
                                         <DialogTrigger asChild>
                                             <Button variant="destructive" size="sm">Limpiar todo</Button>
@@ -253,7 +262,8 @@ empty[k] = '';
                                     <TableHead>Tipo Gasto</TableHead>
                                     <TableHead className="text-right">Aprobado</TableHead>
                                     <TableHead className="text-right">Modificado</TableHead>
-                                    <TableHead className="text-right">Vigente</TableHead>
+                                    <TableHead className="text-right">Vigente anual</TableHead>
+                                    <TableHead className="text-right">Vigente a {mesActual}</TableHead>
                                     <TableHead className="text-right">Comprometido</TableHead>
                                     <TableHead className="text-right">Devengado</TableHead>
                                     <TableHead className="text-right">Pagado</TableHead>
@@ -273,13 +283,13 @@ empty[k] = '';
                                             </div>
                                         </TableHead>
                                     ))}
-                                    <TableHead colSpan={7} />
+                                    <TableHead colSpan={8} />
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {presupuestos.data.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={15} className="py-8 text-center text-muted-foreground">
+                                        <TableCell colSpan={16} className="py-8 text-center text-muted-foreground">
                                             {hasFilters ? 'Sin resultados para los filtros aplicados.' : 'No hay registros. Importe un archivo Excel.'}
                                         </TableCell>
                                     </TableRow>
@@ -310,7 +320,10 @@ empty[k] = '';
                                             >
                                                 {money(p.modificado ?? 0)}
                                             </TableCell>
-                                            <TableCell className="text-right font-mono font-semibold">{money(p.vigente ?? p.IMPORTE_TOTAL)}</TableCell>
+                                            <TableCell className="text-right font-mono">{money(p.vigente ?? p.IMPORTE_TOTAL)}</TableCell>
+                                            <TableCell className="text-right font-mono font-semibold" title={`Aprobado de enero a ${mesActual} ± modificaciones hasta ${mesActual}`}>
+                                                {money(p.vigente_mes ?? 0)}
+                                            </TableCell>
                                             {(['comprometido', 'devengado', 'pagado'] as const).map((momento) => (
                                                 <TableCell
                                                     key={momento}
@@ -321,9 +334,11 @@ empty[k] = '';
                                             ))}
                                             <TableCell className="flex gap-1">
                                                 <DetailDialog p={p} />
-                                                <Button variant="outline" size="sm" asChild>
-                                                    <Link href={`/presupuesto/${p.id_presupuesto}/edit`}><Pencil className="h-4 w-4" /></Link>
-                                                </Button>
+                                                {puedeEditar && (
+                                                    <Button variant="outline" size="sm" asChild>
+                                                        <Link href={`/presupuesto/${p.id_presupuesto}/edit`} title="Editar"><Pencil className="h-4 w-4" /></Link>
+                                                    </Button>
+                                                )}
                                             </TableCell>
                                         </TableRow>
                                     ))

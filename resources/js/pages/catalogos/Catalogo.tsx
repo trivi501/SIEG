@@ -625,7 +625,8 @@ export default function Catalogo({
 
             {/* Alta / edición */}
             <Dialog open={abierto} onOpenChange={setAbierto}>
-                <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+                {/* Más grande: las listas con búsqueda (mes, secretaría, banco…) caben sin desplazar el modal. */}
+                <DialogContent className="max-h-[94vh] min-h-[70vh] overflow-y-auto sm:max-w-5xl lg:max-w-6xl">
                     <form onSubmit={guardar} className="space-y-4">
                         <DialogHeader>
                             <DialogTitle>

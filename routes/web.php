@@ -12,6 +12,7 @@ use App\Http\Controllers\ModificacionPresupuestalController;
 use App\Http\Controllers\OrdenCompraController;
 use App\Http\Controllers\PresupuestoController;
 use App\Http\Controllers\SupportTicketController;
+use App\Http\Controllers\VehiculoMantenimientoController;
 use Illuminate\Support\Facades\Route;
 use Rap2hpoutre\LaravelLogViewer\LogViewerController;
 
@@ -95,6 +96,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('almacen/{ordenCompra}', [AlmacenController::class, 'show'])->name('almacen.show')->middleware('permission:almacen-index');
     Route::post('almacen/{ordenCompra}/entradas', [AlmacenController::class, 'storeEntrada'])->name('almacen.entradas.store')->middleware('permission:almacen-entradas');
     Route::post('almacen/{ordenCompra}/salidas', [AlmacenController::class, 'storeSalida'])->name('almacen.salidas.store')->middleware('permission:almacen-salidas');
+    // Mantenimiento vehicular: recibir el vehículo, su requisición (a nombre de la secretaría de resguardo) y entregarlo.
+    Route::get('vehiculos/mantenimientos', [VehiculoMantenimientoController::class, 'index'])->name('vehiculos.mantenimientos.index')->middleware('permission:vehiculos-mantenimiento');
+    Route::post('vehiculos/mantenimientos', [VehiculoMantenimientoController::class, 'store'])->name('vehiculos.mantenimientos.store')->middleware('permission:vehiculos-mantenimiento');
+    Route::post('vehiculos/mantenimientos/{mantenimiento}/entregar', [VehiculoMantenimientoController::class, 'entregar'])->name('vehiculos.mantenimientos.entregar')->middleware('permission:vehiculos-mantenimiento');
     Route::get('facturas', [FacturaController::class, 'index'])->name('facturas.index')->middleware('permission:facturas-index');
     Route::get('clc', [ClcController::class, 'index'])->name('clc.index')->middleware('permission:clc-index');
     Route::post('clc/accion', [ClcController::class, 'accion'])->name('clc.accion')->middleware('permission:clc-index');
@@ -105,6 +110,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('ordenes-compra/{ordenCompra}/fecha', [OrdenCompraController::class, 'cambiarFecha'])->name('ordenes-compra.fecha')->middleware('permission:ordenes-compra-fecha');
     // Cancelación escalonada: CLC → orden de compra → requisición (requisiciones.cancelar).
     Route::post('ordenes-compra/{ordenCompra}/cancelar-clc', [OrdenCompraController::class, 'cancelarClc'])->name('ordenes-compra.cancelar-clc')->middleware('permission:clc-cancelar');
+    Route::post('ordenes-compra/{ordenCompra}/refacturar', [OrdenCompraController::class, 'refacturar'])->name('ordenes-compra.refacturar')->middleware('permission:ordenes-compra-refacturar');
     Route::post('ordenes-compra/{ordenCompra}/cancelar', [OrdenCompraController::class, 'cancelar'])->name('ordenes-compra.cancelar')->middleware('permission:ordenes-compra-cancelar');
     Route::post('ordenes-compra/{ordenCompra}/verificar-sat', [OrdenCompraController::class, 'verificarSat'])->name('ordenes-compra.verificar-sat')->middleware('permission:ordenes-compra-verificar-sat');
     Route::post('ordenes-compra/{ordenCompra}/clc', [OrdenCompraController::class, 'generarClc'])->name('ordenes-compra.clc')->middleware('permission:requisiciones-clc');

@@ -12,11 +12,13 @@ use App\Models\EjercicioFiscal;
 use App\Models\ModificacionPresupuestal;
 use App\Models\PresupuestoEgreso;
 use App\Models\Proveedor;
+use App\Models\VehiculoMantenimiento;
 use App\Services\ExcelGasto;
 use App\Services\PresupuestoService;
 use App\Services\SaldosMensuales;
 use App\Services\TramiteClc;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -87,21 +89,25 @@ class EgresoRequisicionController extends Controller
         ]);
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $user = auth()->user();
         $isAdmin = self::veTodas($user);
+        $mantenimiento = $this->mantenimientoParaRequisicion($request->input('mantenimiento'));
 
         $unidadesQuery = EgresoUnidadAdministrativa::where('activo', 1);
         $idsVisibles = $this->unidadesVisibles($user, $isAdmin);
-        if ($idsVisibles !== null) {
+        if ($mantenimiento) {
+            // Mantenimiento vehicular: la requisición va a nombre de la secretaría de resguardo del vehículo.
+            $unidadesQuery->whereKey($mantenimiento->id_cat_egreso_unidad_administrativa);
+        } elseif ($idsVisibles !== null) {
             $unidadesQuery->whereIn('id_cat_egreso_unidad_administrativa', $idsVisibles);
         }
         $unidades = $unidadesQuery->orderBy('nombre')->get(['id_cat_egreso_unidad_administrativa', 'clave', 'nombre']);
-        $unidadDefault = ! $isAdmin ? $unidades->first()?->id_cat_egreso_unidad_administrativa : null;
+        $unidadDefault = ! $isAdmin || $mantenimiento ? $unidades->first()?->id_cat_egreso_unidad_administrativa : null;
 
         $hoy = now('America/Mexico_City');
-        [$inicio, $fin] = EjercicioFiscal::periodoCaptura($hoy->year);
+        $periodo = EjercicioFiscal::periodoDelMes($hoy);
 
         return Inertia::render('requisiciones/Create', [
             'catalogs' => [
@@ -109,7 +115,19 @@ class EgresoRequisicionController extends Controller
                 'lineas' => $this->lineasParaCaptura($unidades),
             ],
             'unidadDefault' => $unidadDefault,
-            'periodoCaptura' => ['inicio' => $inicio, 'fin' => $fin, 'abierto' => EjercicioFiscal::enPeriodoDeCaptura($hoy)],
+            'mantenimiento' => $mantenimiento ? [
+                'id' => $mantenimiento->id,
+                'folio' => $mantenimiento->folio_completo,
+                'vehiculo' => $mantenimiento->textoVehiculo(),
+                'area' => $mantenimiento->departamento?->nombre,
+                'tipo' => VehiculoMantenimiento::TIPOS[$mantenimiento->tipo] ?? $mantenimiento->tipo,
+                'descripcion' => $mantenimiento->descripcion,
+            ] : null,
+            'periodoCaptura' => [
+                'inicio' => $periodo['inicio']->format('d/m/Y'),
+                'fin' => $periodo['fin']->format('d/m/Y'),
+                'abierto' => EjercicioFiscal::enPeriodoDeCaptura($hoy),
+            ],
         ]);
     }
 
@@ -150,6 +168,21 @@ class EgresoRequisicionController extends Controller
      *
      * @return array{0: array, 1: array, 2: array} reglas, mensajes y nombres de atributos para validate()
      */
+    /**
+     * Mantenimiento vehicular del que se hace la requisición: en el taller, sin requisición y solo para
+     * quien recibe vehículos (vehiculos-mantenimiento) o Admin.
+     */
+    private function mantenimientoParaRequisicion($id): ?VehiculoMantenimiento
+    {
+        $user = auth()->user();
+        if (! $id || ! ($user->can('vehiculos-mantenimiento') || $user->hasRole(['Super Admin', 'Admin']))) {
+            return null;
+        }
+
+        return VehiculoMantenimiento::with('vehiculo', 'departamento')->whereKey($id)
+            ->where('estado', 'en_taller')->whereNull('id_tb_egreso_requisicion')->first();
+    }
+
     private function reglasCaptura(): array
     {
         return [
@@ -237,9 +270,19 @@ class EgresoRequisicionController extends Controller
         $validated = $request->validate(...$this->reglasCaptura());
 
         $user = auth()->user();
-        $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
-        if ($idsVisibles !== null && ! in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
-            abort(403, 'Esa unidad administrativa no pertenece a tu secretaría.');
+        $mantenimiento = $this->mantenimientoParaRequisicion($request->input('mantenimiento_id'));
+        if ($request->filled('mantenimiento_id') && ! $mantenimiento) {
+            throw ValidationException::withMessages(['concepto' => 'Ese mantenimiento ya tiene requisición o ya se entregó el vehículo.']);
+        }
+        if ($mantenimiento) {
+            if ((int) $validated['id_cat_egreso_unidad_administrativa'] !== (int) $mantenimiento->id_cat_egreso_unidad_administrativa) {
+                abort(403, 'La requisición del mantenimiento va a nombre de la secretaría de resguardo del vehículo.');
+            }
+        } else {
+            $idsVisibles = $this->unidadesVisibles($user, $user->hasRole(['Super Admin', 'Admin']));
+            if ($idsVisibles !== null && ! in_array((int) $validated['id_cat_egreso_unidad_administrativa'], $idsVisibles, true)) {
+                abort(403, 'Esa unidad administrativa no pertenece a tu secretaría.');
+            }
         }
 
         // El folio se numera por el año en curso: si ese ejercicio está cerrado no se admiten requisiciones.
@@ -262,7 +305,7 @@ class EgresoRequisicionController extends Controller
         // Fuera del periodo ordinario de captura queda extemporánea (no avanza sin autorización).
         $extemporanea = ! EjercicioFiscal::enPeriodoDeCaptura(now('America/Mexico_City'));
 
-        DB::transaction(function () use ($user, $validated, $newId, $folioCompleto, $nuevoFolio, $filasCalculadas, $totales, $extemporanea) {
+        DB::transaction(function () use ($user, $validated, $newId, $folioCompleto, $nuevoFolio, $filasCalculadas, $totales, $extemporanea, $mantenimiento) {
             $requisicion = EgresoRequisicion::create([
                 'id_tb_egreso_requisicion' => $newId,
                 'id_cat_egreso_requisicion_estado' => 1, // pendiente
@@ -287,11 +330,15 @@ class EgresoRequisicionController extends Controller
                 'total' => $totales['total'],
                 'monto_requisicion' => $totales['total'],
                 'sub_direccion' => null,
-                'departamento' => null,
+                'departamento' => $mantenimiento?->departamento?->nombre,
                 'beneficiario' => null,
                 'beneficiario_referencia' => null,
                 'extemporanea' => $extemporanea,
             ]);
+
+            if ($mantenimiento) {
+                $mantenimiento->update(['id_tb_egreso_requisicion' => $requisicion->id_tb_egreso_requisicion]);
+            }
 
             // Create detalle records from filas
             if (! empty($filasCalculadas)) {
@@ -346,7 +393,7 @@ class EgresoRequisicionController extends Controller
 
     public function show(EgresoRequisicion $requisicion)
     {
-        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'ordenCompra.movimientosClc.usuario:id,name', 'ordenCompra.canceladaPor:id,name', 'ordenCompra.clcCanceladaPor:id,name', 'extemporaneaAutorizador:id,name', 'canceladaPor:id,name');
+        $requisicion->load('tbEgresoRequisicionDetalles', 'catEgresoRequisicionEstado', 'catEgresoUnidadAdministrativa', 'tbEgresoRequisicionBitacoras', 'ordenCompra.proveedor', 'ordenCompra.movimientosClc.usuario:id,name', 'ordenCompra.canceladaPor:id,name', 'ordenCompra.refacturas.usuario:id,name', 'ordenCompra.clcCanceladaPor:id,name', 'extemporaneaAutorizador:id,name', 'canceladaPor:id,name');
 
         $this->autorizarUnidad($requisicion);
 
@@ -377,10 +424,19 @@ class EgresoRequisicionController extends Controller
             'nombresPresupuesto' => $nombresPresupuesto,
             'validacion' => app(PresupuestoService::class)->validarRequisicion($requisicion),
             'puedeEditarse' => $this->puedeEditarse($requisicion),
-            'periodoCaptura' => EjercicioFiscal::periodoCaptura((int) ($requisicion->año ?: date('Y'))),
+            // Periodo de captura del mes en que se registró (registro: MySQL en hora local).
+            'periodoCaptura' => (function () use ($requisicion) {
+                $p = EjercicioFiscal::periodoDelMes($requisicion->registro ? Carbon::parse($requisicion->registro, 'America/Mexico_City') : now('America/Mexico_City'));
+
+                return [$p['inicio']->format('d/m/Y'), $p['fin']->format('d/m/Y')];
+            })(),
             'puedeCambiarFecha' => $this->puedeCambiarFecha($requisicion),
             'puedeCancelar' => $this->puedeCancelar($requisicion),
             'estadosClc' => collect(TramiteClc::ESTADOS)->map(fn ($e) => $e[0]),
+            // Si viene de un mantenimiento vehicular (taller).
+            'mantenimiento' => ($m = VehiculoMantenimiento::with('vehiculo', 'departamento')->where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)->first())
+                ? ['folio' => $m->folio_completo, 'vehiculo' => $m->textoVehiculo(), 'area' => $m->departamento?->nombre, 'estado' => VehiculoMantenimiento::ESTADOS[$m->estado] ?? $m->estado]
+                : null,
             'puedeCambiarFechaOrden' => $user->can('ordenes-compra-fecha') && ! $requisicion->ordenCompra?->cancelada_at,
             // Cancelación escalonada: primero la CLC, luego la orden de compra (puedeCancelar es la requisición).
             'puedeCancelarClc' => $requisicion->ordenCompra && TramiteClc::impedimentoParaCancelar($requisicion->ordenCompra, $user) === null,
@@ -407,6 +463,9 @@ class EgresoRequisicionController extends Controller
     {
         $user = auth()->user();
         if ($user->can('ordenes-compra-create') || $user->can('requisiciones-suficiencia')) {
+            return;
+        }
+        if ($user->can('vehiculos-mantenimiento') && VehiculoMantenimiento::where('id_tb_egreso_requisicion', $requisicion->id_tb_egreso_requisicion)->exists()) {
             return;
         }
 
@@ -460,7 +519,7 @@ class EgresoRequisicionController extends Controller
             $validated = $request->validate([
                 'fecha_tramite' => 'required|date',
                 'filas' => 'nullable|array',
-                'filas.*.precio_unitario' => 'nullable|numeric|min:0',
+                'filas.*.precio_unitario' => 'nullable|numeric|min:0|decimal:0,4', // la cotización guarda hasta 4 decimales
                 // El IVA se decide aquí, en Recursos Materiales, al cotizar, y por renglón.
                 'filas.*.lleva_iva' => 'boolean',
             ]);

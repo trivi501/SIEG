@@ -13,11 +13,13 @@ use App\Models\EgresoRequisicion;
 use App\Models\EgresoRequisicionDetalle;
 use App\Models\ModificacionPresupuestal;
 use App\Models\OrdenCompra;
+use App\Models\OrdenCompraRefactura;
 use App\Models\PresupuestoEgreso;
 use App\Models\Secretaria;
 use App\Models\SupportTicket;
 use App\Models\TicketComment;
 use App\Models\User;
+use App\Models\VehiculoMantenimiento;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Spatie\Permission\Models\Permission;
@@ -44,6 +46,8 @@ class AuditoriaController extends Controller
             'fecha' => 'Fecha', 'importe' => 'Importe', 'observaciones' => 'Observaciones',
             'xml_uuid' => 'UUID de la factura', 'xml_rfc_emisor' => 'RFC emisor', 'xml_total' => 'Total de la factura',
         ]],
+        OrdenCompraRefactura::class => ['Refacturas de órdenes de compra', ['xml_uuid_anterior' => 'Factura anterior (UUID)', 'clc_folio_anterior' => 'CLC anterior', 'clc_nueva' => 'CLC nueva', 'motivo' => 'Motivo']],
+        VehiculoMantenimiento::class => ['Mantenimiento vehicular', ['folio_completo' => 'Folio', 'vehiculo_id' => 'Vehículo', 'fecha_recepcion' => 'Recepción', 'kilometraje' => 'Kilometraje', 'tipo' => 'Tipo', 'descripcion' => 'Falla o servicio', 'estado' => 'Estado', 'fecha_entrega' => 'Entrega', 'recibe_entrega' => 'Recibe', 'id_tb_egreso_requisicion' => 'Requisición']],
         AlmacenEntrada::class => ['Entradas de almacén', ['folio_completo' => 'Folio', 'orden_compra_id' => 'Orden de compra', 'fecha' => 'Fecha', 'observaciones' => 'Observaciones']],
         AlmacenEntradaDetalle::class => ['Conceptos de entradas de almacén', ['descripcion' => 'Descripción', 'cantidad' => 'Cantidad', 'precio_unitario' => 'Precio unitario']],
         AlmacenSalida::class => ['Salidas de almacén', ['folio_completo' => 'Folio', 'orden_compra_id' => 'Orden de compra', 'fecha' => 'Fecha', 'recibe' => 'Recibe', 'observaciones' => 'Observaciones']],

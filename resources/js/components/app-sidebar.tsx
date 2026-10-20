@@ -9,6 +9,7 @@ import {
     FileText,
     Receipt,
     Warehouse,
+    Car,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import AppLogo from '@/components/app-logo';
@@ -60,12 +61,18 @@ function findActiveSection(path: string): SectionKey | null {
         path.startsWith('/requisiciones') ||
         path.startsWith('/recursos-materiales') ||
         path.startsWith('/catalogos/proveedores') ||
+        path.startsWith('/catalogos/calendario-captura') ||
         path.startsWith('/modificaciones-presupuestales')
     ) {
         return 'Requisiciones';
     }
 
     if (path.startsWith('/almacen')) return 'Almacén';
+    if (
+        path.startsWith('/vehiculos') ||
+        path.startsWith('/catalogos/vehiculos')
+    )
+        return 'Vehículos';
     if (
         path.startsWith('/settings/users') ||
         path.startsWith('/settings/roles') ||
@@ -105,6 +112,7 @@ function filterItems(items: NavItem[]): NavItem[] {
 const SECTION_KEYS = [
     'Requisiciones',
     'Almacén',
+    'Vehículos',
     'Administración',
     'Ajustes',
 ] as const;
@@ -153,6 +161,11 @@ const mainNavItems: NavItem[] = [
                 permission: 'proveedores-index',
             },
             {
+                title: 'Calendario de captura',
+                href: '/catalogos/calendario-captura',
+                permission: 'catalogos-calendario-captura-index',
+            },
+            {
                 title: 'Modificaciones Presupuestales',
                 href: '/modificaciones-presupuestales',
                 permission: 'modificaciones-index',
@@ -171,6 +184,22 @@ const mainNavItems: NavItem[] = [
         href: '/facturas',
         icon: Receipt,
         permission: 'facturas-index',
+    },
+    {
+        title: 'Vehículos',
+        icon: Car,
+        items: [
+            {
+                title: 'Padrón vehicular',
+                href: '/catalogos/vehiculos',
+                permission: 'catalogos-vehiculos-index',
+            },
+            {
+                title: 'Mantenimiento',
+                href: '/vehiculos/mantenimientos',
+                permission: 'vehiculos-mantenimiento',
+            },
+        ],
     },
     {
         title: 'Almacén',
@@ -251,7 +280,11 @@ export function AppSidebar() {
                     items={filteredMain}
                     openSections={navOpenSections}
                     onToggle={(title) => {
-                        if (title === 'Requisiciones' || title === 'Almacén') {
+                        if (
+                            title === 'Requisiciones' ||
+                            title === 'Almacén' ||
+                            title === 'Vehículos'
+                        ) {
                             toggleSection(title);
                         }
                     }}

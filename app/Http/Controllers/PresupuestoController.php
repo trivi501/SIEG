@@ -27,10 +27,10 @@ class PresupuestoController extends Controller
 
     public function index(Request $request)
     {
-        // Consulta: permiso presupuesto-index (Admin y Control Presupuestal); alta, edición, importación y
-        // corrida de saldos siguen siendo solo de Admin.
-
-        $query = PresupuestoEgreso::query();
+        // Consulta: permiso presupuesto-index. Cada área ve solo el presupuesto de su unidad (solo lectura);
+        // Admin y Control Presupuestal, todo. Alta, edición, importación y borrado llevan su propio permiso.
+        $visibles = PresupuestoService::clavesUnidadVisibles(auth()->user());
+        $query = PresupuestoEgreso::query()->when($visibles !== null, fn ($q) => $q->whereIn(DB::raw('TRIM(CLAVE)'), $visibles ?: ['__ninguna__']));
 
         $filters = $request->only(['CLAVE', 'UNIDAD_ADMINISTRATIVA', 'CLAVE3', 'FUENTE_DE_FINANCIAMIENTO', 'CLAVE6', 'PROYECTO', 'PARTIDA', 'capitulo', 'TIPO_DE_GASTO', 'NOMBRE_PARTIDA']);
 
@@ -50,21 +50,30 @@ class PresupuestoController extends Controller
         // Modificado, vigente y momentos del gasto de cada línea (comprometido, devengado, pagado), por clave de línea.
         $momentos = app(PresupuestoService::class)->lineas()->keyBy('clave');
 
+        // Vigente al mes de la consulta: aprobado de enero al mes actual ± modificaciones autorizadas hasta ese mes.
+        $hoy = now(SaldosMensuales::ZONA);
+        $movimientos = app(SaldosMensuales::class)->movimientos($hoy->year);
+        $vigenteAlMes = fn (string $clave) => round(collect($movimientos[$clave] ?? [])
+            ->filter(fn ($m, $mes) => $mes <= $hoy->month)->sum(fn ($m) => $m['asignado'] + $m['modificado']), 2);
+
         return Inertia::render('presupuesto/index', [
-            'presupuestos' => $query->paginate(50)->withQueryString()->through(function (PresupuestoEgreso $linea) use ($momentos) {
-                $saldos = $momentos->get(PresupuestoService::clave($linea->CLAVE, $linea->CLAVE3, $linea->CLAVE6, $linea->PARTIDA), []);
+            'presupuestos' => $query->paginate(50)->withQueryString()->through(function (PresupuestoEgreso $linea) use ($momentos, $vigenteAlMes) {
+                $clave = PresupuestoService::clave($linea->CLAVE, $linea->CLAVE3, $linea->CLAVE6, $linea->PARTIDA);
+                $saldos = $momentos->get($clave, []);
 
                 return [
                     ...$linea->toArray(),
                     'diferencia' => DistribucionMensual::diferencia($linea->IMPORTE_TOTAL, $linea->getAttributes()) / 100,
                     'modificado' => $saldos['modificado'] ?? 0,
                     'vigente' => $saldos['vigente'] ?? (float) $linea->IMPORTE_TOTAL,
+                    'vigente_mes' => $vigenteAlMes($clave),
                     'comprometido' => $saldos['comprometido'] ?? 0,
                     'devengado' => $saldos['devengado'] ?? 0,
                     'pagado' => $saldos['pagado'] ?? 0,
                 ];
             }),
             'filters' => [...$filters, 'descuadradas' => $descuadradas ? '1' : ''],
+            'mesActual' => $hoy->locale('es')->monthName,
             'totalDescuadradas' => PresupuestoEgreso::whereRaw("ABS(COALESCE(`IMPORTE_TOTAL`, 0) - ({$sumaMeses})) >= 0.005")->count(),
         ]);
     }

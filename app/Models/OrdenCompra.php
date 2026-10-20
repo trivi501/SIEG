@@ -83,6 +83,11 @@ class OrdenCompra extends Model
         return $this->clc_folio_completo !== null && $this->clc_cancelada_at === null;
     }
 
+    public function refacturas()
+    {
+        return $this->hasMany(OrdenCompraRefactura::class)->orderBy('id');
+    }
+
     public function entradasAlmacen()
     {
         return $this->hasMany(AlmacenEntrada::class)->orderBy('id');

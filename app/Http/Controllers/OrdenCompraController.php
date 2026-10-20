@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EgresoRequisicion;
 use App\Models\EgresoRequisicionBitacora;
 use App\Models\OrdenCompra;
+use App\Models\OrdenCompraRefactura;
 use App\Models\Proveedor;
 use App\Services\EstadoCfdiSat;
 use App\Services\TramiteClc;
@@ -218,6 +219,16 @@ class OrdenCompraController extends Controller
         }
         EstadoCfdiSat::guardar($ordenCompra, $sat);
 
+        // Refactura con CLC anterior: se genera la CLC nueva al cargar el nuevo XML.
+        $refactura = OrdenCompraRefactura::where('orden_compra_id', $ordenCompra->id)->whereNotNull('clc_folio_anterior')->whereNull('clc_nueva')->latest('id')->first();
+        if ($refactura) {
+            DB::transaction(fn () => $this->crearClc($ordenCompra->fresh(), " (refactura; sustituye a la CLC {$refactura->clc_folio_anterior})"));
+            $refactura->update(['clc_nueva' => $ordenCompra->fresh()->clc_folio_completo]);
+
+            return back()->with('success', "Factura aceptada y CLC {$refactura->clc_nueva} generada (sustituye a la {$refactura->clc_folio_anterior}).")
+                ->with('warning', $sat['efos'] ? self::avisoEfos($cfdi['rfc_emisor']) : null);
+        }
+
         return back()->with('success', 'Factura aceptada (vigente en el SAT): el gasto pasa de comprometido a devengado.')
             ->with('warning', $sat['efos'] ? self::avisoEfos($cfdi['rfc_emisor']) : null);
     }
@@ -360,24 +371,89 @@ class OrdenCompraController extends Controller
                 .($ordenCompra->clc_cancelada_at ? ' (cancelada); sigue cancelar la orden de compra.' : '.'));
         }
 
-        DB::transaction(function () use ($ordenCompra, $requisicion) {
-            $año = (int) now('America/Mexico_City')->format('Y');
-            $folio = (OrdenCompra::where('clc_año', $año)->lockForUpdate()->max('clc_folio') ?? 0) + 1;
-
-            $ordenCompra->update([
-                'clc_folio' => $folio,
-                'clc_año' => $año,
-                'clc_folio_completo' => sprintf('CLC-%d-%04d', $año, $folio),
-                'clc_fecha' => now('America/Mexico_City')->toDateString(),
-                'clc_user_id' => auth()->id(),
-                'clc_generada_at' => now(),
-            ]);
-
-            $this->bitacora($requisicion, EgresoRequisicion::CLC_GENERADA, "CLC {$ordenCompra->clc_folio_completo} generada por $".number_format($ordenCompra->importe, 2)." a favor de {$ordenCompra->proveedor?->nombre}.");
-            app(TramiteClc::class)->generada($ordenCompra, auth()->user());
-        });
+        DB::transaction(fn () => $this->crearClc($ordenCompra));
 
         return back()->with('success', "CLC {$ordenCompra->clc_folio_completo} generada.");
+    }
+
+    /** Folio consecutivo por año (CLC-2026-0001), bitácora y arranque del trámite. */
+    private function crearClc(OrdenCompra $ordenCompra, string $nota = ''): void
+    {
+        $año = (int) now('America/Mexico_City')->format('Y');
+        // Los folios de CLC sustituidas por una refactura ya no están en la orden: también cuentan, para no repetirlos.
+        $sustituidas = OrdenCompraRefactura::where('clc_folio_anterior', 'like', "CLC-{$año}-%")->pluck('clc_folio_anterior')
+            ->map(fn (string $f) => (int) substr($f, strrpos($f, '-') + 1))->max() ?? 0;
+        $folio = max(OrdenCompra::where('clc_año', $año)->lockForUpdate()->max('clc_folio') ?? 0, $sustituidas) + 1;
+
+        $ordenCompra->update([
+            'clc_folio' => $folio,
+            'clc_año' => $año,
+            'clc_folio_completo' => sprintf('CLC-%d-%04d', $año, $folio),
+            'clc_fecha' => now('America/Mexico_City')->toDateString(),
+            'clc_user_id' => auth()->id(),
+            'clc_generada_at' => now(),
+        ]);
+
+        $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::CLC_GENERADA, "CLC {$ordenCompra->clc_folio_completo} generada por $".number_format($ordenCompra->importe, 2)." a favor de {$ordenCompra->proveedor?->nombre}{$nota}.");
+        app(TramiteClc::class)->generada($ordenCompra, auth()->user());
+    }
+
+    /**
+     * Refactura (Admin): el proveedor volvió a facturar. Se quita la factura vigente de la orden (queda en el
+     * historial), se cancela su CLC si la tenía y la orden queda lista para cargar el nuevo XML; al cargarlo
+     * se genera una CLC nueva. Una CLC ya pagada no se refactura.
+     */
+    public function refacturar(Request $request, OrdenCompra $ordenCompra, TramiteClc $tramite)
+    {
+        if ($ordenCompra->cancelada_at) {
+            return back()->with('error', 'La orden de compra está cancelada.');
+        }
+        if (! $ordenCompra->xml_uuid) {
+            return back()->with('error', 'La orden de compra no tiene factura que refacturar.');
+        }
+        if ($ordenCompra->pago_fecha && ! $ordenCompra->clc_cancelada_at) {
+            return back()->with('error', "La CLC {$ordenCompra->clc_folio_completo} ya está pagada: no se puede refacturar.");
+        }
+        $motivo = $this->motivo($request);
+        $user = $request->user();
+
+        DB::transaction(function () use ($ordenCompra, $tramite, $user, $motivo) {
+            $clcAnterior = $ordenCompra->clc_folio_completo;
+            $uuidAnterior = $ordenCompra->xml_uuid;
+            $pagoAnulado = $ordenCompra->pago_fecha ? trim('pago anulado '.($ordenCompra->transferencia_numero ?? '')) : null;
+            $facturaAnterior = trim(($ordenCompra->xml_serie ?? '').' '.($ordenCompra->xml_folio ?? '')) ?: null;
+
+            OrdenCompraRefactura::create([
+                'orden_compra_id' => $ordenCompra->id,
+                'xml_uuid_anterior' => $ordenCompra->xml_uuid, 'xml_folio_anterior' => $facturaAnterior,
+                'xml_total_anterior' => $ordenCompra->xml_total, 'xml_path_anterior' => $ordenCompra->xml_path,
+                'clc_folio_anterior' => $clcAnterior, 'clc_estado_anterior' => $ordenCompra->clc_estado,
+                'motivo' => $motivo, 'user_id' => $user->id,
+            ]);
+
+            // La CLC vigente se cancela en el trámite (queda su movimiento) y la orden queda sin CLC.
+            if ($ordenCompra->clcActiva()) {
+                $tramite->cancelar($ordenCompra, $user, "Refactura: {$motivo}");
+            }
+
+            $ordenCompra->update([
+                'xml_path' => null, 'xml_uuid' => null, 'xml_rfc_emisor' => null, 'xml_nombre_emisor' => null,
+                'xml_serie' => null, 'xml_folio' => null, 'xml_fecha' => null, 'xml_subtotal' => null, 'xml_total' => null,
+                'xml_isr' => null, 'xml_cargado_at' => null, 'xml_user_id' => null,
+                'sat_estado' => null, 'sat_estatus_cancelacion' => null, 'sat_efos' => null, 'sat_verificado_at' => null,
+                'clc_folio' => null, 'clc_año' => null, 'clc_folio_completo' => null, 'clc_fecha' => null, 'clc_user_id' => null,
+                'clc_generada_at' => null, 'clc_estado' => null, 'clc_relacion_id' => null,
+                'clc_cancelada_at' => null, 'clc_cancelada_user_id' => null, 'clc_motivo_cancelacion' => null,
+                // Un pago anulado (CLC cancelada) no pasa a la CLC nueva.
+                'pago_fecha' => null, 'pago_forma' => null, 'pago_referencia' => null, 'pago_user_id' => null, 'pago_registrado_at' => null,
+            ]);
+
+            $this->bitacora($ordenCompra->requisicion, EgresoRequisicion::CON_ORDEN_COMPRA,
+                "Refactura de la orden {$ordenCompra->folio_completo} por {$user->name}: se quita la factura ".trim(($facturaAnterior ?? '')." ({$uuidAnterior})")
+                .($clcAnterior ? " y se cancela la CLC {$clcAnterior}" : '').($pagoAnulado ? " ({$pagoAnulado})" : '').". Motivo: {$motivo}. Al cargar el nuevo XML se genera una CLC nueva.");
+        });
+
+        return back()->with('success', "Orden {$ordenCompra->folio_completo} lista para la nueva factura. Al cargar el XML se genera una CLC nueva.");
     }
 
     /**

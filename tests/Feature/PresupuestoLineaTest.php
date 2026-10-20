@@ -13,11 +13,14 @@ use App\Models\EjercicioFiscal;
 use App\Models\Firmante;
 use App\Models\ModificacionPresupuestal;
 use App\Models\OrdenCompra;
+use App\Models\OrdenCompraRefactura;
 use App\Models\PresupuestoEgreso;
 use App\Models\Proveedor;
 use App\Models\Regidor;
 use App\Models\SaldoMensual;
 use App\Models\User;
+use App\Models\Vehiculo;
+use App\Models\VehiculoMantenimiento;
 use App\Services\Almacen;
 use App\Services\DistribucionMensual;
 use App\Services\PresupuestoService;
@@ -142,6 +145,32 @@ class PresupuestoLineaTest extends TestCase
         $this->post('/presupuesto', $this->linea(['IMPORTE_TOTAL' => '-1', ...array_fill_keys(self::MESES, '0')]))->assertSessionHasErrors('IMPORTE_TOTAL');
         $this->post('/presupuesto', $this->linea(['IMPORTE_TOTAL' => '0', ...array_fill_keys(self::MESES, '0')]))->assertSessionHasNoErrors();
         $this->assertEquals(0, PresupuestoEgreso::firstOrFail()->IMPORTE_TOTAL);
+    }
+
+    public function test_el_area_solo_consulta_su_presupuesto_con_vigente_al_mes()
+    {
+        $this->crearTablasRequisicion();
+        $this->travelTo(Carbon::parse('2026-03-15 18:00:00', 'UTC'));
+        DB::table('cat_egreso_unidad_administrativa')->insert(['id_cat_egreso_unidad_administrativa' => 7, 'clave' => '320', 'nombre' => 'OTRA', 'año' => 2024, 'activo' => true]);
+        $this->post('/presupuesto', $this->linea())->assertSessionHasNoErrors();
+        $this->post('/presupuesto', $this->linea(['CLAVE' => '320']))->assertSessionHasNoErrors();
+
+        // Admin ve todo; vigente al mes (marzo) = aprobado de enero a marzo (3 × 100.01).
+        $this->get('/presupuesto')->assertInertia(fn ($p) => $p->where('presupuestos.total', 2)
+            ->where('mesActual', 'marzo')->where('presupuestos.data.0.vigente_mes', 300.03)->where('presupuestos.data.0.vigente', 1200.12));
+
+        // El área: solo su unidad y solo consulta (no da de alta, no edita, no importa ni borra).
+        $area = User::factory()->create(['id_cat_egreso_unidad_administrativa' => 6]);
+        $area->givePermissionTo('presupuesto-index');
+        $this->actingAs($area)->get('/presupuesto')->assertOk()->assertInertia(fn ($p) => $p->where('presupuestos.total', 1)->where('presupuestos.data.0.CLAVE', '310'));
+        $this->post('/presupuesto', $this->linea(['PARTIDA' => '2112']))->assertForbidden();
+        $this->post('/presupuesto/import')->assertForbidden();
+        $this->delete('/presupuesto')->assertForbidden();
+
+        // En el ejercicio del gasto, también solo las partidas de su unidad (ni el detalle de otra).
+        $area->givePermissionTo('gasto-index');
+        $this->get('/requisiciones/gasto')->assertOk()->assertInertia(fn ($p) => $p->where('filas', fn ($l) => collect($l)->pluck('unidad_clave')->unique()->values()->all() === ['310']));
+        $this->getJson('/requisiciones/gasto/detalle?clave='.urlencode('320|561|101001|2111'))->assertForbidden();
     }
 
     public function test_claves_fuera_de_catalogo_y_lineas_repetidas()
@@ -652,11 +681,10 @@ class PresupuestoLineaTest extends TestCase
             }
         }
 
-        // Presupuesto y Ejercicio y control del gasto: solo Admin y Control Presupuestal.
-        foreach (['/presupuesto', '/requisiciones/gasto'] as $pagina) {
-            $this->actingAs($usuario('control.presupuestal'))->get($pagina)->assertOk();
-            foreach (['area', 'recursos.materiales', 'sindicatura', 'egresos'] as $otro) {
-                $this->actingAs($usuario($otro))->get($pagina)->assertForbidden();
+        // Presupuesto y Ejercicio y control del gasto: Control Presupuestal y el área (esta solo consulta lo de su unidad).
+        foreach (['/presupuesto' => ['control.presupuestal', 'area'], '/requisiciones/gasto' => ['control.presupuestal', 'area']] as $pagina => $pueden) {
+            foreach (['area', 'recursos.materiales', 'control.presupuestal', 'sindicatura', 'egresos'] as $quien) {
+                $this->actingAs($usuario($quien))->get($pagina)->assertStatus(in_array($quien, $pueden, true) ? 200 : 403);
             }
         }
     }
@@ -1008,6 +1036,65 @@ class PresupuestoLineaTest extends TestCase
         $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/cancelar", ['motivo' => 'Prueba'])->assertForbidden();
     }
 
+    public function test_refactura_cancela_la_clc_y_al_cargar_el_nuevo_xml_genera_otra()
+    {
+        Storage::fake('local');
+        $this->crearTablasRequisicion();
+        $this->post('/presupuesto', $this->linea());
+        $proveedor = Proveedor::create(['nombre' => 'DORACELI VALADEZ RODRIGUEZ', 'rfc' => 'VARD870519SR4', 'activo' => true]);
+        $this->requisicion(1, 4524);
+        DB::table('tb_egreso_requisicion')->update(['id_cat_egreso_requisicion_estado' => EgresoRequisicion::CLC_GENERADA]);
+        $orden = OrdenCompra::create([
+            'id_tb_egreso_requisicion' => 1, 'proveedor_id' => $proveedor->id, 'folio' => 1, 'año' => 2026,
+            'folio_completo' => 'OC-2026-0001', 'fecha' => '2026-10-01', 'importe' => 4524,
+            'xml_uuid' => 'AAAAAAAA-1111-2222-3333-444444444444', 'xml_folio' => '100', 'xml_total' => 4524, 'xml_rfc_emisor' => 'VARD870519SR4',
+            'clc_folio' => 1, 'clc_año' => (int) now('America/Mexico_City')->year, 'clc_folio_completo' => 'CLC-'.now('America/Mexico_City')->year.'-0001',
+            'clc_fecha' => '2026-10-02', 'clc_estado' => 'recibida_cp',
+        ]);
+        $clcAnterior = $orden->clc_folio_completo;
+
+        // Solo con el permiso (Admin) y con motivo.
+        $sinPermiso = User::factory()->create();
+        $sinPermiso->givePermissionTo('requisiciones-index');
+        $this->actingAs($sinPermiso)->post("/ordenes-compra/{$orden->id}/refacturar", ['motivo' => 'Refactura'])->assertForbidden();
+        $this->actingAs(User::role('Admin')->first());
+        $this->post("/ordenes-compra/{$orden->id}/refacturar", ['motivo' => ''])->assertSessionHasErrors('motivo');
+
+        // Refactura: la CLC se cancela en el trámite, la factura sale al historial y la orden queda sin factura.
+        $this->post("/ordenes-compra/{$orden->id}/refacturar", ['motivo' => 'El proveedor corrigió el RFC del receptor'])->assertSessionHas('success');
+        $orden->refresh();
+        $this->assertNull($orden->xml_uuid);
+        $this->assertNull($orden->clc_folio_completo);
+        $this->assertSame(EgresoRequisicion::CON_ORDEN_COMPRA, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+        $this->assertSame('cancelar', ClcMovimiento::where('orden_compra_id', $orden->id)->latest('id')->value('accion'));
+        $refactura = OrdenCompraRefactura::firstOrFail();
+        $this->assertSame(['AAAAAAAA-1111-2222-3333-444444444444', $clcAnterior, null], [$refactura->xml_uuid_anterior, $refactura->clc_folio_anterior, $refactura->clc_nueva]);
+
+        // Al cargar el nuevo XML se genera una CLC nueva (otro folio) y arranca su trámite.
+        $xml = UploadedFile::fake()->createWithContent('nueva.xml', <<<'XML'
+            <?xml version="1.0" encoding="utf-8"?>
+            <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Serie="1" Folio="101" Fecha="2026-10-05T08:00:00" SubTotal="3900.00" Total="4524.00" TipoDeComprobante="I">
+              <cfdi:Emisor Rfc="VARD870519SR4" Nombre="DORACELI VALADEZ RODRIGUEZ" RegimenFiscal="612" />
+              <cfdi:Receptor Rfc="MGU6501015R2" Nombre="MUNICIPIO DE GUADALUPE ZAC" UsoCFDI="G03" />
+              <cfdi:Complemento>
+                <tfd:TimbreFiscalDigital xmlns:tfd="http://www.sat.gob.mx/TimbreFiscalDigital" Version="1.1" UUID="BBBBBBBB-1111-2222-3333-444444444444" />
+              </cfdi:Complemento>
+            </cfdi:Comprobante>
+            XML);
+        $this->post("/ordenes-compra/{$orden->id}/xml", ['xml' => $xml])->assertSessionHasNoErrors()->assertSessionHas('success');
+        $orden->refresh();
+        $this->assertSame('BBBBBBBB-1111-2222-3333-444444444444', $orden->xml_uuid);
+        $this->assertNotNull($orden->clc_folio_completo);
+        $this->assertNotSame($clcAnterior, $orden->clc_folio_completo);
+        $this->assertSame('generada', $orden->clc_estado);
+        $this->assertSame($orden->clc_folio_completo, $refactura->fresh()->clc_nueva);
+        $this->assertSame(EgresoRequisicion::CLC_GENERADA, (int) DB::table('tb_egreso_requisicion')->value('id_cat_egreso_requisicion_estado'));
+
+        // Una CLC pagada ya no se refactura.
+        $orden->update(['clc_estado' => 'pagada', 'pago_fecha' => '2026-10-10']);
+        $this->post("/ordenes-compra/{$orden->id}/refacturar", ['motivo' => 'Otra vez'])->assertSessionHas('error');
+    }
+
     public function test_la_factura_de_una_orden_cancelada_se_carga_una_vez_mas()
     {
         Storage::fake('local');
@@ -1107,6 +1194,100 @@ class PresupuestoLineaTest extends TestCase
         $consulta = User::factory()->create();
         $consulta->givePermissionTo('almacen-index');
         $this->actingAs($consulta)->post("/almacen/{$orden->id}/salidas", ['fecha' => '2026-10-04', 'cantidades' => [1 => 1]])->assertForbidden();
+    }
+
+    public function test_la_cotizacion_guarda_precios_unitarios_con_cuatro_decimales()
+    {
+        $this->crearTablasRequisicion();
+        Schema::table('tb_egreso_requisicion', function (Blueprint $t) {
+            $t->decimal('sub_total', 18, 4)->nullable();
+            $t->decimal('iva', 18, 4)->nullable();
+            $t->decimal('monto_requisicion', 18, 4)->nullable();
+        });
+        Schema::table('tb_egreso_requisicion_detalle', function (Blueprint $t) {
+            $t->decimal('cantidad', 22, 4)->nullable();
+            $t->decimal('iva', 18, 4)->nullable();
+            $t->decimal('iva_factor', 8, 4)->nullable();
+        });
+        $this->requisicion(1, 0);
+        DB::table('tb_egreso_requisicion')->update(['id_cat_egreso_requisicion_estado' => EgresoRequisicion::EN_COTIZACION, 'suficiencia' => null]);
+        DB::table('tb_egreso_requisicion_detalle')->update(['cantidad' => 3]);
+
+        // Más de 4 decimales no; con 4 se guarda tal cual y el total se calcula con ellos.
+        $this->put('/requisiciones/1', ['fecha_tramite' => '2026-10-01', 'filas' => [['precio_unitario' => '12.34567', 'lleva_iva' => false]]])
+            ->assertSessionHasErrors('filas.0.precio_unitario');
+        $this->put('/requisiciones/1', ['fecha_tramite' => '2026-10-01', 'filas' => [['precio_unitario' => '12.3456', 'lleva_iva' => false]]])
+            ->assertSessionHasNoErrors();
+        $this->assertEquals(12.3456, (float) DB::table('tb_egreso_requisicion_detalle')->value('precio_unitario'));
+        $this->assertEquals(37.0368, (float) DB::table('tb_egreso_requisicion_detalle')->value('total'));
+    }
+
+    public function test_mantenimiento_vehicular_y_requisicion_a_nombre_de_la_secretaria_de_resguardo()
+    {
+        $this->travelTo(Carbon::parse('2026-10-03 18:00:00', 'UTC'));
+        $this->crearTablasRequisicion();
+        // Columnas que escribe el alta de requisición (la tabla legada mínima de la prueba no las tiene).
+        Schema::table('tb_egreso_requisicion', function (Blueprint $t) {
+            foreach (['id_cat_egreso_solicitud_tipo', 'id_tb_egreso_presupuesto', 'id_cat_area_x_nombre_y_puesto_Solicita', 'id_cat_area_x_nombre_y_puesto_Autoriza',
+                'id_tb_usuarios', 'id_user_laravel', 'id_tb_egreso_presupuesto_detalle', 'id_tb_egreso_proveedor', 'folio'] as $c) {
+                $t->integer($c)->nullable();
+            }
+            foreach (['folio_completo', 'observaciones', 'sub_direccion', 'departamento', 'beneficiario', 'beneficiario_referencia', 'registro'] as $c) {
+                $t->string($c)->nullable();
+            }
+            foreach (['sub_total', 'isr', 'iva', 'descuento', 'monto_requisicion'] as $c) {
+                $t->decimal($c, 18, 4)->nullable();
+            }
+        });
+        Schema::table('tb_egreso_requisicion_detalle', function (Blueprint $t) {
+            $t->integer('id_cat_egreso_producto')->nullable();
+            $t->integer('id_tb_egreso_presupuesto_detalle')->nullable();
+            $t->integer('id_tb_egreso_presupuesto')->nullable();
+            $t->decimal('cantidad', 22, 4)->nullable();
+            $t->string('descripcion')->nullable();
+            $t->string('articulo')->nullable();
+            $t->decimal('iva', 18, 4)->nullable();
+            $t->decimal('iva_factor', 8, 4)->nullable();
+            $t->decimal('descuento', 18, 4)->nullable();
+        });
+        $this->post('/presupuesto', $this->linea())->assertSessionHasNoErrors();
+        DB::table('cat_egreso_unidad_administrativa')->insert(['id_cat_egreso_unidad_administrativa' => 7, 'clave' => '320', 'nombre' => 'TALLER', 'año' => 2024, 'activo' => true]);
+        $vehiculo = Vehiculo::create(['numero_economico' => 'T-15', 'placas' => 'ZAC1234', 'marca' => 'NISSAN', 'linea' => 'NP300', 'modelo' => 2020,
+            'id_cat_egreso_unidad_administrativa' => 6, 'estado' => 'en_servicio', 'activo' => true]);
+
+        // El taller (de otra unidad) recibe el vehículo: folio y queda en taller; no se recibe dos veces.
+        $taller = User::factory()->create(['id_cat_egreso_unidad_administrativa' => 7]);
+        $taller->givePermissionTo('vehiculos-mantenimiento', 'requisiciones-index', 'requisiciones-create');
+        $this->actingAs($taller)->post('/vehiculos/mantenimientos', ['vehiculo_id' => $vehiculo->id, 'fecha_recepcion' => '2026-10-03', 'kilometraje' => 85000,
+            'tipo' => 'correctivo', 'descripcion' => 'Frenos traseros con ruido', 'entrega' => 'JUAN PÉREZ'])->assertSessionHasNoErrors();
+        $mantenimiento = VehiculoMantenimiento::firstOrFail();
+        $this->assertSame(['MV-2026-0001', 6, 'taller'], [$mantenimiento->folio_completo, (int) $mantenimiento->id_cat_egreso_unidad_administrativa, $vehiculo->fresh()->estado]);
+        $this->post('/vehiculos/mantenimientos', ['vehiculo_id' => $vehiculo->id, 'fecha_recepcion' => '2026-10-03', 'tipo' => 'preventivo', 'descripcion' => 'Afinación'])
+            ->assertSessionHasErrors('vehiculo_id');
+
+        // La requisición va a nombre de la secretaría de resguardo (310), aunque el taller sea de otra unidad.
+        $this->get("/requisiciones/crear?mantenimiento={$mantenimiento->id}")->assertOk()->assertInertia(fn ($p) => $p
+            ->where('mantenimiento.folio', 'MV-2026-0001')->where('unidadDefault', 6)->where('catalogs.unidades', fn ($u) => collect($u)->pluck('clave')->all() === ['310']));
+        $requisicion = ['concepto' => 'MANTENIMIENTO CORRECTIVO T-15', 'fecha_tramite' => '2026-10-03', 'mantenimiento_id' => $mantenimiento->id,
+            'filas' => [['fuente' => '561', 'proyecto' => '101001', 'partida' => '2111', 'cantidad' => 1, 'descripcion' => 'BALATAS TRASERAS']]];
+        $this->post('/requisiciones', [...$requisicion, 'id_cat_egreso_unidad_administrativa' => 7])->assertForbidden(); // otra secretaría no
+        $this->post('/requisiciones', [...$requisicion, 'id_cat_egreso_unidad_administrativa' => 6])->assertSessionHasNoErrors();
+        $req = EgresoRequisicion::firstOrFail();
+        $this->assertSame(6, (int) $req->id_cat_egreso_unidad_administrativa);
+        $this->assertSame((int) $req->id_tb_egreso_requisicion, (int) $mantenimiento->fresh()->id_tb_egreso_requisicion);
+        // Ya tiene requisición: no se hace otra.
+        $this->post('/requisiciones', [...$requisicion, 'id_cat_egreso_unidad_administrativa' => 6])->assertSessionHasErrors('concepto');
+        // El taller la consulta (aunque no sea de su unidad) y la lista la muestra.
+        $this->get("/requisiciones/{$req->id_tb_egreso_requisicion}")->assertOk()->assertInertia(fn ($p) => $p->where('mantenimiento.folio', 'MV-2026-0001'));
+        $this->get('/vehiculos/mantenimientos')->assertOk()->assertInertia(fn ($p) => $p->where('mantenimientos.data.0.requisicion', $req->folio_completo));
+
+        // Se entrega: vuelve a servicio.
+        $this->post("/vehiculos/mantenimientos/{$mantenimiento->id}/entregar", ['fecha_entrega' => '2026-10-02', 'recibe_entrega' => 'JUAN PÉREZ'])->assertSessionHasErrors('fecha_entrega');
+        $this->post("/vehiculos/mantenimientos/{$mantenimiento->id}/entregar", ['fecha_entrega' => '2026-10-03', 'recibe_entrega' => 'JUAN PÉREZ'])->assertSessionHasNoErrors();
+        $this->assertSame(['entregado', 'en_servicio'], [$mantenimiento->fresh()->estado, $vehiculo->fresh()->estado]);
+
+        // Sin el permiso, no entra al taller.
+        $this->actingAs(User::factory()->create())->get('/vehiculos/mantenimientos')->assertForbidden();
     }
 
     public function test_recursos_materiales_regresa_la_requisicion_al_area_sin_stock()
@@ -1213,6 +1394,22 @@ class PresupuestoLineaTest extends TestCase
             ->assertSessionHasNoErrors();
         $this->assertSame([1, 10], EjercicioFiscal::periodoCaptura(2026));
         $this->assertTrue(EjercicioFiscal::enPeriodoDeCaptura(Carbon::parse('2026-10-08 12:00', 'America/Mexico_City')));
+
+        // Calendario por mes (el Admin define inicio y fin): manda sobre los días del ejercicio.
+        $this->post('/catalogos/calendario-captura', ['año' => 2026, 'mes' => '11', 'fecha_inicio' => '2026-11-10', 'fecha_fin' => '2026-11-05', 'activo' => true])
+            ->assertSessionHasErrors('fecha_fin');
+        $this->post('/catalogos/calendario-captura', ['año' => 2026, 'mes' => '11', 'fecha_inicio' => '2026-10-29', 'fecha_fin' => '2026-11-12', 'activo' => true])
+            ->assertSessionHasNoErrors();
+        $this->post('/catalogos/calendario-captura', ['año' => 2026, 'mes' => '11', 'fecha_inicio' => '2026-11-01', 'fecha_fin' => '2026-11-03', 'activo' => true])
+            ->assertSessionHasErrors('mes'); // un periodo por mes
+        $this->assertTrue(EjercicioFiscal::enPeriodoDeCaptura(Carbon::parse('2026-11-12 22:00', 'America/Mexico_City')));
+        $this->assertFalse(EjercicioFiscal::enPeriodoDeCaptura(Carbon::parse('2026-11-13 08:00', 'America/Mexico_City')));
+        // El de noviembre empieza el 29 de octubre: ese día ya está en periodo.
+        $this->assertTrue(EjercicioFiscal::enPeriodoDeCaptura(Carbon::parse('2026-10-29 09:00', 'America/Mexico_City')));
+        $periodo = EjercicioFiscal::periodoDelMes(Carbon::parse('2026-11-20', 'America/Mexico_City'));
+        $this->assertSame(['2026-10-29', '2026-11-12', true], [$periodo['inicio']->toDateString(), $periodo['fin']->toDateString(), $periodo['calendario']]);
+        // Diciembre sin registro: días del ejercicio (1 al 10).
+        $this->assertSame('2026-12-10', EjercicioFiscal::periodoDelMes(Carbon::parse('2026-12-20'))['fin']->toDateString());
 
         // Una extemporánea no se envía a revisión hasta que se autoriza.
         DB::table('tb_egreso_requisicion')->insert(['id_tb_egreso_requisicion' => 1, 'id_cat_egreso_unidad_administrativa' => 6, 'id_cat_egreso_requisicion_estado' => 1, 'extemporanea' => true]);

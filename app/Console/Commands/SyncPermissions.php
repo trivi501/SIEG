@@ -44,11 +44,13 @@ class SyncPermissions extends Command
             // Órdenes de compra (Recursos Materiales)
             'ordenes-compra-create', 'ordenes-compra-pagar', 'ordenes-compra-fecha',
             'ordenes-compra-verificar-sat', // vuelve a consultar en el SAT si la factura sigue vigente
+            'ordenes-compra-refacturar', // Admin: el proveedor volvió a facturar (cancela la CLC; al cargar el nuevo XML se genera otra)
             'ordenes-compra-cancelar', // cancela la orden de compra (antes, su CLC); después sigue la requisición
 
             // Trámite de CLC: ver la bandeja y actuar como cada área (el pago es ordenes-compra-pagar).
             // Almacén: ver bandeja e inventario, registrar entradas y salidas; RM asigna la orden de compra al almacén.
             'almacen-index', 'almacen-entradas', 'almacen-salidas', 'ordenes-compra-almacen',
+            'vehiculos-mantenimiento', // taller: recibir vehículos, hacer su requisición (a nombre de la secretaría de resguardo) y entregarlos
             'facturas-index', // pestaña Facturas: CFDI cargados, validación en el SAT y su trámite
             'clc-index', 'clc-recursos-materiales', 'clc-control-presupuestal', 'clc-sindicatura', 'clc-egresos',
             'clc-cancelar', // cancela la CLC según el paso: el área hasta que la recibe RM, RM hasta que la recibe CP, CP hasta que la recibe Sindicatura (Admin siempre)

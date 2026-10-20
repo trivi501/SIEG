@@ -53,10 +53,11 @@ export default function SearchableSelect({
 
             setOpen(false);
         };
-        // Se cierra si se desplaza la página (el panel quedaría flotando fuera de lugar),
-        // pero no al desplazarse dentro de su propia lista de opciones.
+        // Se cierra si se desplaza la página (el panel fijo quedaría flotando fuera de lugar), pero no
+        // al desplazarse dentro de su propia lista de opciones. El panel inline (dentro de un Dialog) se
+        // mueve con su contenedor, así que no se cierra al desplazarlo.
         const handleScroll = (e: Event) => {
-            if (panelRef.current?.contains(e.target as Node)) {
+            if (inline || panelRef.current?.contains(e.target as Node)) {
                 return;
             }
 
@@ -78,7 +79,7 @@ export default function SearchableSelect({
             document.removeEventListener('scroll', handleScroll, true);
             document.removeEventListener('keydown', handleKey);
         };
-    }, [open]);
+    }, [open, inline]);
 
     const toggle = () => {
         if (disabled) {
@@ -233,7 +234,8 @@ export default function SearchableSelect({
                         placeholder="Buscar..."
                         className="w-full border-b border-input bg-transparent px-2 py-1.5 text-xs focus:outline-none"
                     />
-                    <div className="max-h-56 overflow-y-auto">
+                    {/* overscroll-contain: al llegar al final, el scroll no pasa al modal ni a la página. */}
+                    <div className="max-h-56 overflow-y-auto overscroll-contain">
                         <button
                             type="button"
                             onClick={() => select('')}
