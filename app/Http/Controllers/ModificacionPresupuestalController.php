@@ -67,11 +67,15 @@ class ModificacionPresupuestalController extends Controller
     private function captura(): array
     {
         $user = auth()->user();
+        $periodo = ModificacionPresupuestal::periodoCaptura();
 
         return [
             'abierta' => ModificacionPresupuestal::puedeCapturar($user),
             'siempre' => ModificacionPresupuestal::siempreAbierta($user),
-            'ultimoDia' => ModificacionPresupuestal::ultimoDiaCaptura()->format('Y-m-d'),
+            'inicio' => $periodo['inicio']->format('Y-m-d'),
+            'ultimoDia' => $periodo['fin']->format('Y-m-d'),
+            'calendario' => $periodo['calendario'],
+            'proximaApertura' => ModificacionPresupuestal::proximaApertura()->format('Y-m-d'),
             'diasCierre' => ModificacionPresupuestal::DIAS_CIERRE,
         ];
     }
@@ -79,9 +83,11 @@ class ModificacionPresupuestalController extends Controller
     private function exigirCapturaAbierta(): void
     {
         if (! ModificacionPresupuestal::puedeCapturar(auth()->user())) {
-            throw ValidationException::withMessages(['tipo' => 'La captura de modificaciones presupuestales de este mes está cerrada: el último día fue el '
-                .ModificacionPresupuestal::ultimoDiaCaptura()->format('d/m/Y').' ('.ModificacionPresupuestal::DIAS_CIERRE
-                .' días antes del fin de mes). Solo Control Presupuestal puede registrar modificaciones hasta el próximo mes.']);
+            $periodo = ModificacionPresupuestal::periodoCaptura();
+
+            throw ValidationException::withMessages(['tipo' => 'La captura de modificaciones presupuestales está cerrada (periodo del '
+                .$periodo['inicio']->format('d/m/Y').' al '.$periodo['fin']->format('d/m/Y').'); se abre el '
+                .ModificacionPresupuestal::proximaApertura()->format('d/m/Y').'. Mientras tanto, solo Control Presupuestal puede registrar modificaciones.']);
         }
     }
 

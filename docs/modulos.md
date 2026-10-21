@@ -162,7 +162,7 @@ Lo cancelado ya no se imprime: ni la CLC, ni la orden de compra, ni el formato d
 
 Las áreas solo ven y usan líneas de sus unidades (no pueden modificar las de otra área); quien autoriza (Control Presupuestal) ve todas y siempre puede registrar traspasos y modificaciones.
 
-**Cierre de captura**: las áreas registran modificaciones hasta **3 días antes del fin de mes** (en octubre, hasta el 28; del 29 al 31 está cerrada, en hora de México) y se abre de nuevo el día 1. La lista y el formulario muestran el aviso y ocultan / desactivan el botón; el servidor también lo rechaza. Control Presupuestal y Admin capturan todo el mes.
+**Periodo de captura**: el Admin define en el **Calendario de captura de modificaciones** (`/catalogos/calendario-modificaciones`, menú *Requisiciones → Calendario de modificaciones*, permisos `catalogos-calendario-modificaciones-*`) la fecha de inicio y la de fin de cada mes (un registro por año y mes; el de un mes puede empezar a fines del anterior). Las áreas solo registran modificaciones dentro de ese periodo. Un mes sin registro usa la regla por omisión: del día 1 hasta **3 días antes del fin de mes** (en octubre, hasta el 28), en hora de México (`ModificacionPresupuestal::periodoCaptura()` / `proximaApertura()`). La lista y el formulario muestran el aviso y ocultan / desactivan el botón; el servidor también lo rechaza. Control Presupuestal y Admin capturan todo el mes.
 
 ---
 

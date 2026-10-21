@@ -45,22 +45,69 @@ class ModificacionPresupuestal extends Model
     public const DIAS_CIERRE = 3;
 
     /**
-     * Último día del mes en que las áreas pueden capturar: el fin de mes menos DIAS_CIERRE (en octubre,
-     * hasta el 28; del 29 al 31 está cerrada).
+     * Periodo de captura de las áreas para la fecha: el del calendario (Catálogos → Calendario de captura de
+     * modificaciones) que la incluya o el de su mes; si el mes no está registrado, del día 1 hasta el fin de
+     * mes menos DIAS_CIERRE (en octubre, hasta el 28).
+     *
+     * @return array{inicio: CarbonImmutable, fin: CarbonImmutable, calendario: bool}
      */
-    public static function ultimoDiaCaptura(?CarbonImmutable $hoy = null): CarbonImmutable
+    public static function periodoCaptura(?CarbonImmutable $hoy = null): array
     {
         $hoy ??= CarbonImmutable::now(SaldosMensuales::ZONA);
+        $dia = $hoy->toDateString();
+        $activos = CalendarioModificaciones::where('activo', true);
 
-        return $hoy->endOfMonth()->subDays(self::DIAS_CIERRE)->startOfDay();
+        // Uno que incluya hoy (el de noviembre puede empezar a fines de octubre) o, si no, el del mes.
+        $mes = (clone $activos)->whereDate('fecha_inicio', '<=', $dia)->whereDate('fecha_fin', '>=', $dia)->orderBy('fecha_inicio')->first()
+            ?? (clone $activos)->where('año', $hoy->year)->where('mes', $hoy->month)->first();
+        if ($mes) {
+            return [
+                'inicio' => CarbonImmutable::parse($mes->fecha_inicio->toDateString(), SaldosMensuales::ZONA),
+                'fin' => CarbonImmutable::parse($mes->fecha_fin->toDateString(), SaldosMensuales::ZONA),
+                'calendario' => true,
+            ];
+        }
+
+        return [
+            'inicio' => $hoy->startOfMonth()->startOfDay(),
+            'fin' => $hoy->endOfMonth()->subDays(self::DIAS_CIERRE)->startOfDay(),
+            'calendario' => false,
+        ];
     }
 
-    /** Control Presupuestal (quien autoriza) y Admin capturan siempre; las áreas, hasta el día de cierre. */
+    /** Último día del periodo de captura de las áreas (ver periodoCaptura()). */
+    public static function ultimoDiaCaptura(?CarbonImmutable $hoy = null): CarbonImmutable
+    {
+        return self::periodoCaptura($hoy)['fin'];
+    }
+
+    /** Control Presupuestal (quien autoriza) y Admin capturan siempre; las áreas, dentro de su periodo. */
     public static function puedeCapturar(User $user, ?CarbonImmutable $hoy = null): bool
     {
-        $hoy ??= CarbonImmutable::now(SaldosMensuales::ZONA);
+        if (self::siempreAbierta($user)) {
+            return true;
+        }
 
-        return self::siempreAbierta($user) || $hoy->startOfDay()->lte(self::ultimoDiaCaptura($hoy));
+        $periodo = self::periodoCaptura($hoy);
+        $dia = ($hoy ?? CarbonImmutable::now(SaldosMensuales::ZONA))->toDateString();
+
+        return $dia >= $periodo['inicio']->toDateString() && $dia <= $periodo['fin']->toDateString();
+    }
+
+    /** Siguiente día en que se abre la captura para las áreas (si hoy está cerrada). */
+    public static function proximaApertura(?CarbonImmutable $hoy = null): CarbonImmutable
+    {
+        $hoy ??= CarbonImmutable::now(SaldosMensuales::ZONA);
+        $periodo = self::periodoCaptura($hoy);
+        if ($hoy->toDateString() < $periodo['inicio']->toDateString()) {
+            return $periodo['inicio'];
+        }
+
+        // Periodo del mes siguiente (o uno del calendario que empiece antes).
+        $siguiente = CalendarioModificaciones::where('activo', true)->whereDate('fecha_inicio', '>', $hoy->toDateString())->orderBy('fecha_inicio')->first();
+        $delMes = self::periodoCaptura($hoy->addMonthNoOverflow()->startOfMonth())['inicio'];
+
+        return $siguiente ? min(CarbonImmutable::parse($siguiente->fecha_inicio->toDateString(), SaldosMensuales::ZONA), $delMes) : $delMes;
     }
 
     public static function siempreAbierta(User $user): bool

@@ -62,6 +62,7 @@ function findActiveSection(path: string): SectionKey | null {
         path.startsWith('/recursos-materiales') ||
         path.startsWith('/catalogos/proveedores') ||
         path.startsWith('/catalogos/calendario-captura') ||
+        path.startsWith('/catalogos/calendario-modificaciones') ||
         path.startsWith('/modificaciones-presupuestales')
     ) {
         return 'Requisiciones';
@@ -169,6 +170,11 @@ const mainNavItems: NavItem[] = [
                 title: 'Modificaciones Presupuestales',
                 href: '/modificaciones-presupuestales',
                 permission: 'modificaciones-index',
+            },
+            {
+                title: 'Calendario de modificaciones',
+                href: '/catalogos/calendario-modificaciones',
+                permission: 'catalogos-calendario-modificaciones-index',
             },
         ],
     },

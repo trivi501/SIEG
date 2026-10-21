@@ -5,15 +5,19 @@ export interface CapturaModificaciones {
     abierta: boolean;
     /** Control Presupuestal / Admin: capturan todo el mes. */
     siempre: boolean;
+    inicio: string;
     ultimoDia: string;
+    /** true = periodo del Calendario de captura de modificaciones; false = regla por omisión. */
+    calendario: boolean;
+    proximaApertura: string;
     diasCierre: number;
 }
 
 const fecha = (ymd: string) => ymd.split('-').reverse().join('/');
 
 /**
- * Aviso del cierre de la captura: las áreas capturan hasta {diasCierre} días antes del fin de mes;
- * Control Presupuestal siempre puede.
+ * Aviso del periodo de captura de las áreas: el del calendario que define el Admin o, si el mes no está
+ * registrado, del día 1 hasta {diasCierre} días antes del fin de mes. Control Presupuestal siempre puede.
  */
 export default function AvisoCapturaModificaciones({
     captura,
@@ -23,6 +27,15 @@ export default function AvisoCapturaModificaciones({
     if (captura.siempre) {
         return null;
     }
+
+    const periodo = (
+        <>
+            del <strong>{fecha(captura.inicio)}</strong> al{' '}
+            <strong>{fecha(captura.ultimoDia)}</strong>
+            {!captura.calendario &&
+                ` (se cierra ${captura.diasCierre} días antes del fin de mes)`}
+        </>
+    );
 
     return (
         <div
@@ -35,17 +48,15 @@ export default function AvisoCapturaModificaciones({
             <CalendarClock className="mt-0.5 h-4 w-4 shrink-0" />
             {captura.abierta ? (
                 <span>
-                    La captura de modificaciones de este mes está abierta hasta
-                    el <strong>{fecha(captura.ultimoDia)}</strong> (se cierra{' '}
-                    {captura.diasCierre} días antes del fin de mes).
+                    La captura de modificaciones está abierta: {periodo}.
                 </span>
             ) : (
                 <span>
-                    La captura de modificaciones de este mes{' '}
-                    <strong>está cerrada</strong>: el último día fue el{' '}
-                    {fecha(captura.ultimoDia)} ({captura.diasCierre} días antes
-                    del fin de mes). Se abre de nuevo el día 1; mientras tanto,
-                    solo Control Presupuestal puede registrar modificaciones.
+                    La captura de modificaciones <strong>está cerrada</strong>{' '}
+                    (periodo {periodo}). Se abre el{' '}
+                    <strong>{fecha(captura.proximaApertura)}</strong>; mientras
+                    tanto, solo Control Presupuestal puede registrar
+                    modificaciones.
                 </span>
             )}
         </div>

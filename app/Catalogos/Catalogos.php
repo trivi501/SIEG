@@ -4,6 +4,7 @@ namespace App\Catalogos;
 
 use App\Models\Banco;
 use App\Models\CalendarioCaptura;
+use App\Models\CalendarioModificaciones;
 use App\Models\Departamento;
 use App\Models\EgresoFuenteFinanciamiento;
 use App\Models\EgresoObjetoGasto;
@@ -268,6 +269,37 @@ final class Catalogos
                         $errores['fecha_fin'] = 'El fin de captura no puede ser anterior al inicio.';
                     }
                     if (isset($datos['año'], $datos['mes']) && CalendarioCaptura::where('año', $datos['año'])->where('mes', $datos['mes'])
+                        ->when($registro, fn ($q) => $q->whereKeyNot($registro->getKey()))->exists()) {
+                        $errores['mes'] = 'Ese mes ya tiene su periodo de captura; edítalo.';
+                    }
+
+                    return $errores;
+                },
+            ),
+            new Catalogo(
+                slug: 'calendario-modificaciones',
+                titulo: 'Calendario de captura de modificaciones',
+                singular: 'periodo de captura',
+                grupo: 'Ejercicios y documentos',
+                descripcion: 'Inicio y fin del periodo en que las áreas capturan modificaciones presupuestales de cada mes. Fuera de él solo Control Presupuestal y Admin pueden registrarlas. Un mes sin registrar va del día 1 hasta 3 días antes del fin de mes.',
+                modelo: CalendarioModificaciones::class,
+                campos: [
+                    Campo::entero('año', 'Año')->requerido()->min(2000)->max(2100)->porDefecto(fn () => (int) date('Y')),
+                    Campo::seleccion('mes', 'Mes', CalendarioCaptura::MESES)->requerido()->porDefecto(fn () => (string) now('America/Mexico_City')->month),
+                    Campo::fecha('fecha_inicio', 'Inicio de captura')->requerido(),
+                    Campo::fecha('fecha_fin', 'Fin de captura')->requerido()
+                        ->ayuda('Inclusive: ese día el área todavía puede capturar.'),
+                    Campo::activo(),
+                ],
+                buscar: ['año'],
+                llave: ['año', 'mes'],
+                orden: ['año' => 'desc', 'mes' => 'asc'],
+                validar: function (array $datos, $registro = null) {
+                    $errores = [];
+                    if (! empty($datos['fecha_inicio']) && ! empty($datos['fecha_fin']) && $datos['fecha_inicio'] > $datos['fecha_fin']) {
+                        $errores['fecha_fin'] = 'El fin de captura no puede ser anterior al inicio.';
+                    }
+                    if (isset($datos['año'], $datos['mes']) && CalendarioModificaciones::where('año', $datos['año'])->where('mes', $datos['mes'])
                         ->when($registro, fn ($q) => $q->whereKeyNot($registro->getKey()))->exists()) {
                         $errores['mes'] = 'Ese mes ya tiene su periodo de captura; edítalo.';
                     }

@@ -899,9 +899,36 @@ class PresupuestoLineaTest extends TestCase
         $this->post('/modificaciones-presupuestales', [...$solicitud, 'origen' => '320|561|101001|2111', 'destino' => '310|561|101001|2111'])->assertSessionHasNoErrors();
         $this->assertSame(2, ModificacionPresupuestal::count());
 
-        // El día 1 se abre de nuevo.
+        // Sin calendario, el día 1 se abre de nuevo.
         $this->travelTo(Carbon::parse('2026-11-01 07:00:00', 'UTC'));
         $this->actingAs($area)->post('/modificaciones-presupuestales', [...$solicitud, 'origen_mes' => 11, 'destino_mes' => 11])->assertSessionHasNoErrors();
+        ModificacionPresupuestal::latest('id')->first()->delete();
+        $this->travelTo(Carbon::parse('2026-10-29 07:00:00', 'UTC'));
+
+        // Calendario de captura de modificaciones (Admin): manda sobre la regla de los 3 días.
+        $this->actingAs(User::factory()->create()->assignRole('Admin'));
+        $this->post('/catalogos/calendario-modificaciones', ['año' => 2026, 'mes' => '10', 'fecha_inicio' => '2026-10-05', 'fecha_fin' => '2026-10-02', 'activo' => true])
+            ->assertSessionHasErrors('fecha_fin');
+        $this->post('/catalogos/calendario-modificaciones', ['año' => 2026, 'mes' => '10', 'fecha_inicio' => '2026-10-05', 'fecha_fin' => '2026-10-30', 'activo' => true])
+            ->assertSessionHasNoErrors();
+        $this->post('/catalogos/calendario-modificaciones', ['año' => 2026, 'mes' => '11', 'fecha_inicio' => '2026-11-03', 'fecha_fin' => '2026-11-20', 'activo' => true])
+            ->assertSessionHasNoErrors();
+
+        // 29 de octubre: con el calendario (hasta el 30) el área ya puede capturar.
+        $this->actingAs($area)->get('/modificaciones-presupuestales/crear')
+            ->assertInertia(fn ($p) => $p->where('captura.abierta', true)->where('captura.inicio', '2026-10-05')->where('captura.ultimoDia', '2026-10-30')->where('captura.calendario', true));
+        $this->post('/modificaciones-presupuestales', $solicitud)->assertSessionHasNoErrors();
+
+        // 31 de octubre: cerrada; se abre el 3 de noviembre (y el 2 sigue cerrada).
+        $this->travelTo(Carbon::parse('2026-10-31 18:00:00', 'UTC'));
+        $this->get('/modificaciones-presupuestales')
+            ->assertInertia(fn ($p) => $p->where('captura.abierta', false)->where('captura.proximaApertura', '2026-11-03'));
+        $this->post('/modificaciones-presupuestales', $solicitud)->assertSessionHasErrors('tipo');
+        $this->travelTo(Carbon::parse('2026-11-02 18:00:00', 'UTC'));
+        $this->post('/modificaciones-presupuestales', $solicitud)->assertSessionHasErrors('tipo');
+        $this->travelTo(Carbon::parse('2026-11-03 18:00:00', 'UTC'));
+        $this->post('/modificaciones-presupuestales', [...$solicitud, 'origen_mes' => 11, 'destino_mes' => 11])->assertSessionHasNoErrors();
+        $this->assertSame(4, ModificacionPresupuestal::count());
     }
 
     public function test_cada_area_ve_sus_requisiciones_y_control_presupuestal_todas()
